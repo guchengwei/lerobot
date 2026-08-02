@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
+from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 
 pytest.importorskip("wandb", reason="wandb is required (install lerobot[training])")
 
@@ -28,6 +28,7 @@ from lerobot.integrations.wandb_artifacts.store import (
     ArtifactTypeMismatchError,
     DownloadDestinationNotEmptyError,
     MaterializedArtifact,
+    PromotionNotVisibleError,
     RegistryLinkRefusedError,
     declare_input,
     download_artifact,
@@ -463,7 +464,7 @@ def test_declare_input_rejects_a_malformed_ref_before_calling_wandb():
 class _FakePromotableArtifact(_FakeArtifact):
     """A committed artifact as ``Api().artifact()`` returns it: aliases, a manifest, no bytes."""
 
-    def __init__(self, *, entries=(SAFETENSORS_SINGLE_FILE,), aliases=("v3",), **kwargs):
+    def __init__(self, *, entries=(CONFIG_NAME, SAFETENSORS_SINGLE_FILE), aliases=("v3",), **kwargs):
         super().__init__(**kwargs)
         self.aliases = list(aliases)
         self.manifest = SimpleNamespace(entries=dict.fromkeys(entries, object()))
@@ -477,9 +478,22 @@ class _FakePromotableArtifact(_FakeArtifact):
         self.links.append((target_path, aliases))
 
 
-def _fake_api(artifact, monkeypatch):
+def _fake_api(artifact, monkeypatch, *, alias_resolves_to=None):
+    """`Api().artifact()` is called twice: once for the requested ref, once to re-resolve the alias.
+
+    `alias_resolves_to` stands in for a server that did *not* move the alias.
+    """
+    calls = []
+
+    def _artifact(name):
+        calls.append(name)
+        # Call 1 is the requested ref; call 2 is the alias read-back.
+        if len(calls) > 1 and alias_resolves_to is not None:
+            return alias_resolves_to
+        return artifact
+
     api = MagicMock()
-    api.artifact.return_value = artifact
+    api.artifact.side_effect = _artifact
     monkeypatch.setattr(wandb, "Api", lambda *a, **k: api)
     return api
 
@@ -494,7 +508,11 @@ def test_promote_model_aliases_the_existing_version_and_uploads_nothing(monkeypa
         registry_collection="pick-cube-policy",
     )
 
-    api.artifact.assert_called_once_with("my-team/my-project/pick-cube-policy:v3")
+    assert [c.args[0] for c in api.artifact.call_args_list] == [
+        "my-team/my-project/pick-cube-policy:v3",
+        # The alias is re-resolved to prove the promotion is visible, not assumed.
+        "my-team/my-project/pick-cube-policy:production",
+    ]
     assert artifact.aliases == ["v3", "production"]
     assert artifact.saved == 1
     assert artifact.links == [("wandb-registry-model/pick-cube-policy", ["production"])]
@@ -546,7 +564,7 @@ def test_promote_model_refuses_to_register_a_version_that_cannot_be_rolled_out(m
     artifact = _FakePromotableArtifact(
         name="pick-cube-policy:v3",
         type="model",
-        entries=("adapter_config.json", "adapter_model.safetensors"),
+        entries=(CONFIG_NAME, "adapter_config.json", "adapter_model.safetensors"),
         metadata={"base_model_name_or_path": "lerobot/pi0"},
     )
     _fake_api(artifact, monkeypatch)
@@ -568,7 +586,7 @@ def test_promote_model_allows_an_adapter_only_alias_without_a_registry_link(monk
     artifact = _FakePromotableArtifact(
         name="pick-cube-policy:v3",
         type="model",
-        entries=("adapter_config.json", "adapter_model.safetensors"),
+        entries=(CONFIG_NAME, "adapter_config.json", "adapter_model.safetensors"),
     )
     _fake_api(artifact, monkeypatch)
 
@@ -585,3 +603,76 @@ def test_promote_model_rejects_a_malformed_ref_before_calling_wandb(monkeypatch)
         promote_model("not-a-ref", alias="production")
 
     api.artifact.assert_not_called()
+
+
+def test_promote_model_fails_when_the_alias_still_resolves_elsewhere(monkeypatch):
+    """The one server behaviour no mock can vouch for, turned into a checked postcondition.
+
+    If W&B ever stops moving an alias off the version that held it, two versions would claim
+    `production` and the CLI would report success. This is what makes that loud instead.
+    """
+    artifact = _FakePromotableArtifact(name="pick-cube-policy:v3", type="model")
+    stale = _FakePromotableArtifact(name="pick-cube-policy:v2", type="model")
+    stale.version = "v2"
+    _fake_api(artifact, monkeypatch, alias_resolves_to=stale)
+
+    with pytest.raises(PromotionNotVisibleError, match="still resolves to v2"):
+        promote_model(
+            "my-team/my-project/pick-cube-policy:v3",
+            alias="production",
+            registry_collection="pick-cube-policy",
+        )
+
+    # The link ran first (see `promote_model` on ordering), so it has already happened when the
+    # alias turns out not to be visible. That residual state is why the error names it.
+    assert artifact.links == [("wandb-registry-model/pick-cube-policy", ["production"])]
+
+
+def test_promote_model_refuses_a_weights_only_periodic_checkpoint(monkeypatch):
+    """Weights present is not the same as loadable.
+
+    `WandBLogger.log_policy` uploads a full-weight periodic checkpoint as `model.safetensors`
+    alone. It passes an "is it self-contained" check that looks only at weights, and still cannot
+    be loaded as a policy, because `PreTrainedConfig.from_pretrained` needs `config.json`.
+    """
+    artifact = _FakePromotableArtifact(
+        name="pick-cube-policy:v3", type="model", entries=(SAFETENSORS_SINGLE_FILE,)
+    )
+    _fake_api(artifact, monkeypatch)
+
+    with pytest.raises(RegistryLinkRefusedError, match=CONFIG_NAME):
+        promote_model(
+            "my-team/my-project/pick-cube-policy:v3",
+            alias="production",
+            registry_collection="pick-cube-policy",
+        )
+
+    assert artifact.saved == 0
+    assert artifact.links == []
+
+
+def test_promote_model_links_before_moving_the_project_alias(monkeypatch):
+    """A failed link must leave nothing changed, not a `production` alias with no Registry entry."""
+    order = []
+
+    class _FailingLinkArtifact(_FakePromotableArtifact):
+        def link(self, target_path, aliases=None):
+            order.append("link")
+            raise RuntimeError("permission denied on wandb-registry-model/pick-cube-policy")
+
+        def save(self):
+            order.append("save")
+            super().save()
+
+    artifact = _FailingLinkArtifact(name="pick-cube-policy:v3", type="model")
+    _fake_api(artifact, monkeypatch)
+
+    with pytest.raises(RuntimeError, match="permission denied"):
+        promote_model(
+            "my-team/my-project/pick-cube-policy:v3",
+            alias="production",
+            registry_collection="pick-cube-policy",
+        )
+
+    assert order == ["link"]
+    assert artifact.aliases == ["v3"]

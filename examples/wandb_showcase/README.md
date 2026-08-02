@@ -225,12 +225,18 @@ The alias lands on the project collection and on the Registry link, the same two
 `model upload --registry-collection` puts it. The printed digest is the one you started with —
 that is how you check no bytes moved.
 
-Two refusals worth knowing before you need them. A ref that is not a `model` artifact is rejected,
-as everywhere else. And a version that cannot be rolled out on its own — an adapter-only
-checkpoint whose base model is not bundled — is refused a Registry link, since a Registry
-collection is where a team looks for something deployable. That check reads the version's file
-manifest, so it costs no download. Dropping `--registry-collection` still lets you alias such a
-version inside the project, matching what `model upload` already allows.
+Refusals worth knowing before you need them. A ref that is not a `model` artifact is rejected, as
+everywhere else. And a version that cannot be loaded as a policy on its own is refused a Registry
+link, since a Registry collection is where a team looks for something deployable — either because
+it has no `config.json` (a periodic training checkpoint is uploaded as weights alone) or because
+it is an adapter-only checkpoint whose base model is not bundled. That check reads the version's
+file manifest, so it costs no download. Dropping `--registry-collection` still lets you alias such
+a version inside the project, matching what `model upload` already allows.
+
+When you do pass `--registry-collection`, the Registry link happens before the project alias
+moves. There is no transaction over the pair, and this is the order where a failed link leaves
+nothing changed at all rather than a `production` alias pointing at a version that never reached
+the Registry.
 
 Whether a rollout justifies promoting at all is your call, made by looking at the run. Nothing in
 this pipeline computes it.

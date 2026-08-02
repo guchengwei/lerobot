@@ -30,7 +30,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
+from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 from packaging.version import Version
 
 from lerobot.utils.import_utils import require_package
@@ -49,6 +49,10 @@ class ArtifactTypeMismatchError(ValueError):
 
 class RegistryLinkRefusedError(ValueError):
     """A Registry link was requested for a version that cannot be rolled out on its own."""
+
+
+class PromotionNotVisibleError(RuntimeError):
+    """An alias was applied, but the reference still resolves to a different version."""
 
 
 class DownloadDestinationNotEmptyError(ValueError):
@@ -112,6 +116,35 @@ def link_to_registry(
     return target_path
 
 
+def _registry_refusal_from_manifest(artifact: wandb.Artifact) -> str | None:
+    """Why ``artifact`` must not be linked into the Registry, judged without downloading it.
+
+    Mirrors ``validate_model_directory`` plus ``registry_link_refusal``, which together decide
+    whether a *local* directory is a loadable, self-contained policy. Both check only file
+    existence, so ``manifest.entries`` — keyed by in-artifact path — answers the same question for
+    a remote version at the cost of no bytes.
+
+    Both halves matter. ``WandBLogger.log_policy`` uploads a full-weight periodic checkpoint as
+    ``model.safetensors`` alone, with no ``config.json``: weights present, still unloadable, since
+    ``PreTrainedConfig.from_pretrained`` needs the config.
+    """
+    entries = artifact.manifest.entries
+    if CONFIG_NAME not in entries:
+        return (
+            f"the artifact has no {CONFIG_NAME}, so it cannot be loaded as a LeRobot policy "
+            "(a periodic training checkpoint is uploaded as weights alone)"
+        )
+
+    # Deferred: `inspect` pulls datasets/pandas/pyarrow (the `dataset` extra), and importing this
+    # module must stay possible on a base install — see the module docstring.
+    from .inspect import registry_link_refusal
+
+    return registry_link_refusal(
+        is_self_contained=SAFETENSORS_SINGLE_FILE in entries,
+        base_model_name_or_path=(artifact.metadata or {}).get("base_model_name_or_path"),
+    )
+
+
 def promote_model(
     ref: str | ArtifactRef,
     *,
@@ -130,15 +163,18 @@ def promote_model(
     ``Artifact.link`` reaches the Registry without a ``Run``. A run here would exist only to
     exist — no inputs, no outputs, no metrics.
 
-    Deployability is judged from the artifact's file manifest, not from a download and not from
-    its stored ``is_self_contained``: the manifest carries the same file-existence signal
-    ``validate_model_directory`` checks locally, costs no bytes, and is not mutable after the fact.
+    Deployability is judged from the artifact's file manifest by
+    :func:`_registry_refusal_from_manifest`, not from a download and not from its stored
+    ``is_self_contained``: the manifest carries the same file-existence signal the local checks
+    use, costs no bytes, and is not mutable after the fact.
 
     Raises:
         ArtifactTypeMismatchError: ``ref`` is not a ``model`` artifact.
         RegistryLinkRefusedError: a Registry link was requested for a version that cannot be
             rolled out on its own. The alias is not applied either — the whole command is refused,
             because a half-done promotion is worse than none.
+        PromotionNotVisibleError: the alias was applied but the reference still resolves
+            elsewhere, so the Registry link is not attempted either.
     """
     parsed = ref if isinstance(ref, ArtifactRef) else parse_artifact_ref(ref)
     wandb = _wandb_sdk()
@@ -150,26 +186,43 @@ def promote_model(
         )
 
     if registry_collection is not None:
-        # Deferred: `inspect` pulls datasets/pandas/pyarrow (the `dataset` extra), and importing
-        # this module must stay possible on a base install — see the module docstring.
-        from .inspect import registry_link_refusal
-
-        refusal = registry_link_refusal(
-            is_self_contained=SAFETENSORS_SINGLE_FILE in artifact.manifest.entries,
-            base_model_name_or_path=(artifact.metadata or {}).get("base_model_name_or_path"),
-        )
+        refusal = _registry_refusal_from_manifest(artifact)
         if refusal is not None:
             raise RegistryLinkRefusedError(
                 f"Refusing to link {artifact.qualified_name} into Registry collection "
                 f"{registry_collection!r}: {refusal}."
             )
 
+        # Linked before the project alias moves, deliberately. Both writes can fail and there is no
+        # transaction over the pair, so the order is chosen by what a failure leaves behind: the
+        # link is the permission-sensitive, cross-project call, and if it fails here nothing has
+        # changed at all. Aliasing first would leave `production` pointing at a version that never
+        # reached the Registry.
+        artifact.link(f"wandb-registry-model/{registry_collection}", aliases=[alias])
+
     if alias not in artifact.aliases:
         artifact.aliases = [*artifact.aliases, alias]
         artifact.save()
 
-    if registry_collection is not None:
-        artifact.link(f"wandb-registry-model/{registry_collection}", aliases=[alias])
+    # Check what the caller actually wanted, not the mechanism that was supposed to deliver it.
+    # "W&B moves an alias off the version that held it" is server-enforced and unprovable from a
+    # test; "entity/project/name:alias now resolves to the version we promoted" is one read, and
+    # it fails loudly if that server behaviour ever changes rather than leaving two versions
+    # claiming the same alias.
+    resolved = wandb.Api().artifact(f"{parsed.entity}/{parsed.project}/{parsed.name}:{alias}")
+    if resolved.version != artifact.version:
+        linked = (
+            f" The version was already linked into {registry_collection!r}, so that link exists "
+            "without the matching project alias."
+            if registry_collection is not None
+            else ""
+        )
+        raise PromotionNotVisibleError(
+            f"Applied alias {alias!r} to {artifact.qualified_name}, but "
+            f"{parsed.entity}/{parsed.project}/{parsed.name}:{alias} still resolves to "
+            f"{resolved.version}. The promotion did not take effect; do not treat "
+            f"{alias!r} as pointing at {artifact.version}.{linked}"
+        )
 
     return MaterializedArtifact(
         requested_ref=str(parsed),
