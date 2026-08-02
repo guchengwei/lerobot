@@ -46,6 +46,7 @@ from lerobot.integrations.wandb_artifacts.inspect import (
     ModelDirectoryError,
     inspect_dataset_directory,
     inspect_model_directory,
+    registry_link_refusal,
     validate_dataset_directory,
     validate_model_directory,
 )
@@ -338,7 +339,6 @@ def test_inspect_extracts_metadata(tmp_path):
     assert metadata.total_episodes == metadata.total_frames == metadata.total_tasks == 0
     assert set(metadata.video_keys) == {video_key}
     assert set(metadata.camera_keys) == {video_key, image_key}
-    assert metadata.source_path == root.resolve()
 
 
 def test_inspect_git_commit_matches_lerobot_checkout_head(tmp_path):
@@ -412,7 +412,6 @@ def test_to_wandb_metadata_is_json_safe(tmp_path):
     root = _write_empty_dataset(tmp_path / "dataset")
     payload = inspect_dataset_directory(root).to_wandb_metadata()
     json.dumps(payload)
-    assert payload["source_path"] == str(root.resolve())
     assert isinstance(payload["camera_keys"], list)
 
 
@@ -511,7 +510,6 @@ def test_inspect_model_directory_extracts_metadata(tmp_path):
     assert metadata.has_full_weights is True
     assert metadata.has_adapter_weights is False
     assert metadata.policy_type == "diffusion"
-    assert metadata.source_path == root.resolve()
 
 
 def test_inspect_model_directory_reports_adapter_weights(tmp_path):
@@ -558,7 +556,6 @@ def test_model_to_wandb_metadata_is_json_safe(tmp_path):
     (root / SAFETENSORS_SINGLE_FILE).write_bytes(b"weights")
     payload = inspect_model_directory(root).to_wandb_metadata()
     json.dumps(payload)
-    assert payload["source_path"] == str(root.resolve())
     assert payload["policy_type"] == "act"
 
 
@@ -621,6 +618,43 @@ def test_inspect_model_directory_still_refuses_when_the_base_model_is_bundled(tm
 
     assert metadata.is_self_contained is False
     assert any(record.levelname == "WARNING" for record in caplog.records)
+
+
+def test_published_metadata_redacts_a_machine_local_base_model_path(tmp_path):
+    """The dataclass keeps the real path for callers on this machine; W&B never sees it.
+
+    Deleting `source_path` was not enough on its own: an adapter trained against a local base
+    directory publishes that directory through `base_model_name_or_path`, and again through the
+    refusal reason stored beside it.
+    """
+    import json
+
+    root = tmp_path / "model"
+    base_model_dir = tmp_path / "local-base-model"
+    base_model_dir.mkdir()
+    _write_model_config(root, policy_type="act")
+    _write_adapter_config(root, base_model_name_or_path=str(base_model_dir))
+
+    metadata = inspect_model_directory(root)
+    payload = metadata.to_wandb_metadata()
+    refusal = registry_link_refusal(metadata)
+
+    assert metadata.base_model_name_or_path == str(base_model_dir)
+    assert str(base_model_dir) not in payload["base_model_name_or_path"]
+    assert str(base_model_dir) not in refusal
+    assert str(tmp_path) not in json.dumps(payload)
+
+
+def test_published_metadata_keeps_a_hub_repo_id_verbatim(tmp_path):
+    """Redaction targets machine-local paths only: a Hub repo id is the useful, non-leaking case."""
+    root = tmp_path / "model"
+    _write_model_config(root, policy_type="act")
+    _write_adapter_config(root, base_model_name_or_path="lerobot/pi0")
+
+    metadata = inspect_model_directory(root)
+
+    assert metadata.to_wandb_metadata()["base_model_name_or_path"] == "lerobot/pi0"
+    assert "lerobot/pi0" in registry_link_refusal(metadata)
 
 
 def test_inspect_model_directory_no_warning_with_full_weights(tmp_path, caplog):
