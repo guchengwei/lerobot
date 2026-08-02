@@ -11,18 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Every `lerobot-wandb` command in the showcase README parses against the real CLI.
+"""The W&B showcase remains executable after its documented values are supplied.
 
 Documentation that drifts from its CLI is worse than no documentation: a reader pastes a command
-that no longer exists and concludes the tool is broken. This is the cheap mechanical half of
-"verified to actually work" — it cannot prove a command does the right thing against live W&B, but
-it does prove every flag shown still exists, is still spelled that way, and is still accepted
-together with the others. Renaming or removing a flag fails here until the README is updated.
+that no longer exists and concludes the tool is broken. These tests cover the mechanical half of
+"verified to actually work": setup values are declared once and reused, runtime values remain
+explicit, and every resulting command still parses against the real CLI. They deliberately do not
+claim to exercise live W&B or robot hardware.
 """
 
 import re
 import shlex
 from pathlib import Path
+from string import Template
 
 import pytest
 
@@ -30,22 +31,43 @@ pytest.importorskip("wandb", reason="wandb is required (install lerobot[training
 
 from lerobot.integrations.wandb_artifacts import cli
 
-README = Path(__file__).parents[3] / "examples" / "wandb_showcase" / "README.md"
+REPO_ROOT = Path(__file__).parents[3]
+README = REPO_ROOT / "examples" / "wandb_showcase" / "README.md"
+ROOT_README = REPO_ROOT / "README.md"
 
 # A fenced bash block, then every backslash-continued command inside it that starts with the CLI
 # under test. Other tools shown in the README (lerobot-record, lerobot-train, lerobot-rollout) are
 # parsed by draccus from a much larger config surface and are deliberately out of scope here.
 _BASH_BLOCK = re.compile(r"```bash\n(.*?)```", re.S)
+_EXPORT = re.compile(r'^export\s+([A-Z_][A-Z0-9_]*)="([^"]*)"\s*$', re.M)
 
 
-def _readme_commands() -> list[str]:
+def _readme_text() -> str:
+    return README.read_text()
+
+
+def _documented_env() -> dict[str, str]:
+    return dict(_EXPORT.findall(_readme_text()))
+
+
+def _expand_documented_values(command: str) -> str:
+    expanded = Template(command).substitute(_documented_env())
+    assert "$" not in expanded, f"README command contains an undeclared shell value: {expanded}"
+    return expanded
+
+
+def _raw_readme_commands() -> list[str]:
     commands = []
-    for block in _BASH_BLOCK.findall(README.read_text()):
+    for block in _BASH_BLOCK.findall(_readme_text()):
         for command in block.replace("\\\n", " ").splitlines():
             command = command.strip()
             if command.startswith("lerobot-wandb "):
                 commands.append(" ".join(command.split()))
     return commands
+
+
+def _readme_commands() -> list[str]:
+    return [_expand_documented_values(command) for command in _raw_readme_commands()]
 
 
 def test_the_readme_actually_contains_commands():
@@ -59,6 +81,38 @@ def test_the_readme_actually_contains_commands():
         assert expected in joined
 
 
+def test_root_readme_onboards_the_fork_before_the_upstream_package():
+    text = ROOT_README.read_text()
+    fork_start = text.index("## This fork: W&B-native SO-101 workflow")
+    quick_start = text.index("## Quick Start")
+    pypi_install = text.index("pip install lerobot")
+
+    assert fork_start < quick_start < pypi_install
+    fork_section = text[fork_start:quick_start]
+    assert "uv sync --locked --extra core_scripts --extra feetech --extra training" in fork_section
+    assert "source .venv/bin/activate" in fork_section
+    assert "lerobot-wandb --help" in fork_section
+
+
+def test_showcase_declares_and_reuses_operator_values():
+    text = _readme_text()
+    env = _documented_env()
+
+    assert env["WANDB_ENTITY"] == "your-wandb-entity"
+    assert env["WANDB_PROJECT"] == "so101-pick-cube"
+    assert re.fullmatch(r"v\d+", env["MODEL_VERSION"])
+    assert env["EPISODES_SUCCEEDED"].isdigit()
+    assert "source .venv/bin/activate" in text
+    assert "my-team" not in text
+
+    commands = " ".join(_raw_readme_commands())
+    assert '--entity "$WANDB_ENTITY"' in commands
+    assert '--project "$WANDB_PROJECT"' in commands
+    assert "$WANDB_ENTITY/$WANDB_PROJECT" in commands
+    assert ':$MODEL_VERSION"' in commands
+    assert '--episodes-succeeded "$EPISODES_SUCCEEDED"' in commands
+
+
 @pytest.mark.parametrize("command", _readme_commands(), ids=lambda c: " ".join(c.split()[:3]))
 def test_readme_command_parses_against_the_real_cli(command):
     args = cli.build_parser().parse_args(shlex.split(command)[1:])
@@ -66,10 +120,11 @@ def test_readme_command_parses_against_the_real_cli(command):
 
 
 def _readme_train_command() -> list[str]:
-    for block in _BASH_BLOCK.findall(README.read_text()):
+    for block in _BASH_BLOCK.findall(_readme_text()):
         for command in block.replace("\\\n", " ").splitlines():
             if command.strip().startswith("lerobot-train "):
-                return shlex.split(" ".join(command.split()))[1:]
+                expanded = _expand_documented_values(" ".join(command.split()))
+                return shlex.split(expanded)[1:]
     raise AssertionError("the showcase README no longer shows a lerobot-train command")
 
 
@@ -95,8 +150,10 @@ def test_readme_train_command_parses_and_validates(tmp_path):
     cfg = draccus.parse(TrainPipelineConfig, args=args)
     cfg.validate()
 
-    assert cfg.dataset.artifact_ref == "my-team/so101-pick-cube/pick-cube:raw"
+    assert cfg.dataset.artifact_ref == "your-wandb-entity/so101-pick-cube/pick-cube:raw"
     assert cfg.dataset.repo_id is None
+    assert cfg.wandb.entity == "your-wandb-entity"
+    assert cfg.wandb.project == "so101-pick-cube"
     assert cfg.wandb.model_artifact_name == "pick-cube-policy"
     assert cfg.wandb.registered_model_name == "pick-cube-policy"
     # The showcase promises W&B is the only remote store; `push_to_hub` defaults to True.
@@ -104,10 +161,11 @@ def test_readme_train_command_parses_and_validates(tmp_path):
 
 
 def _readme_command_for(tool: str) -> list[str]:
-    for block in _BASH_BLOCK.findall(README.read_text()):
+    for block in _BASH_BLOCK.findall(_readme_text()):
         for command in block.replace("\\\n", " ").splitlines():
             if command.strip().startswith(f"{tool} "):
-                return shlex.split(" ".join(command.split()))[1:]
+                expanded = _expand_documented_values(" ".join(command.split()))
+                return shlex.split(expanded)[1:]
     raise AssertionError(f"the showcase README no longer shows a {tool} command")
 
 
@@ -132,9 +190,11 @@ def test_readme_records_the_immutable_model_version_for_the_rollout():
     downloaded through: `cmd_rollout_upload` resolves the ref again at upload time, so an alias that
     moved in between would record a model the rollout never used — wrong, and authoritative-looking.
     """
-    upload = next(c for c in _readme_commands() if c.startswith("lerobot-wandb rollout upload"))
-    model_ref = upload.split("--model-ref ", 1)[1].split()[0]
+    raw_upload = next(c for c in _raw_readme_commands() if c.startswith("lerobot-wandb rollout upload"))
+    assert ":$MODEL_VERSION" in raw_upload
 
+    upload = _expand_documented_values(raw_upload)
+    model_ref = upload.split("--model-ref ", 1)[1].split()[0].strip('"')
     assert re.fullmatch(r"[^:]+:v\d+", model_ref), f"--model-ref must pin a version, got {model_ref!r}"
 
 
