@@ -174,7 +174,8 @@ def promote_model(
             rolled out on its own. The alias is not applied either — the whole command is refused,
             because a half-done promotion is worse than none.
         PromotionNotVisibleError: the alias was applied but the reference still resolves
-            elsewhere, so the Registry link is not attempted either.
+            elsewhere. Any requested Registry link was already made by then — two calls, no
+            transaction, so the choice is which partial state, not whether one exists.
     """
     parsed = ref if isinstance(ref, ArtifactRef) else parse_artifact_ref(ref)
     wandb = _wandb_sdk()
@@ -193,35 +194,25 @@ def promote_model(
                 f"{registry_collection!r}: {refusal}."
             )
 
-        # Linked before the project alias moves, deliberately. Both writes can fail and there is no
-        # transaction over the pair, so the order is chosen by what a failure leaves behind: the
-        # link is the permission-sensitive, cross-project call, and if it fails here nothing has
-        # changed at all. Aliasing first would leave `production` pointing at a version that never
-        # reached the Registry.
+        # Linked first: no transaction covers both writes, and a failed link this way changes
+        # nothing, where aliasing first would leave `production` on a version that never reached
+        # the Registry.
         artifact.link(f"wandb-registry-model/{registry_collection}", aliases=[alias])
 
     if alias not in artifact.aliases:
         artifact.aliases = [*artifact.aliases, alias]
         artifact.save()
 
-    # Check what the caller actually wanted, not the mechanism that was supposed to deliver it.
-    # "W&B moves an alias off the version that held it" is server-enforced and unprovable from a
-    # test; "entity/project/name:alias now resolves to the version we promoted" is one read, and
-    # it fails loudly if that server behaviour ever changes rather than leaving two versions
-    # claiming the same alias.
+    # Check the postcondition, not the mechanism: that W&B takes an alias off the version holding
+    # it is server-enforced and unprovable from a test, but "the ref now resolves to what we
+    # promoted" is one read.
     resolved = wandb.Api().artifact(f"{parsed.entity}/{parsed.project}/{parsed.name}:{alias}")
     if resolved.version != artifact.version:
-        linked = (
-            f" The version was already linked into {registry_collection!r}, so that link exists "
-            "without the matching project alias."
-            if registry_collection is not None
-            else ""
-        )
         raise PromotionNotVisibleError(
             f"Applied alias {alias!r} to {artifact.qualified_name}, but "
             f"{parsed.entity}/{parsed.project}/{parsed.name}:{alias} still resolves to "
-            f"{resolved.version}. The promotion did not take effect; do not treat "
-            f"{alias!r} as pointing at {artifact.version}.{linked}"
+            f"{resolved.version}. Do not treat {alias!r} as pointing at {artifact.version}; any "
+            f"Registry link requested here was already made."
         )
 
     return MaterializedArtifact(
