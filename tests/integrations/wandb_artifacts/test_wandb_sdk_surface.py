@@ -83,3 +83,38 @@ def test_run_link_artifact_accepts_expected_params():
 @pytest.mark.parametrize("attr", ["entity", "project", "finish"])
 def test_run_exposes_expected_attributes(attr):
     assert hasattr(wandb.sdk.wandb_run.Run, attr)
+
+
+# ---------------------------------------------------------------------------
+# `model promote` runs without a Run: it reads through `Api`, mutates aliases in place, and links
+# from the artifact itself. Mocked tests can't see any of this drift, so pin the surface here.
+# ---------------------------------------------------------------------------
+
+
+def test_api_artifact_accepts_a_ref_string():
+    assert "name" in _params(wandb.Api.artifact)
+
+
+def test_artifact_link_accepts_expected_params():
+    # promote_model() calls artifact.link(target_path, aliases=...) rather than going through a
+    # Run, which is what makes the command runless.
+    params = _params(wandb.Artifact.link)
+    assert {"target_path", "aliases"} <= params
+
+
+def test_artifact_aliases_is_settable():
+    assert isinstance(wandb.Artifact.aliases, property)
+    assert wandb.Artifact.aliases.fset is not None
+
+
+def test_artifact_save_exists():
+    # Behavioural caveat this cannot catch: `save()` on an already-committed artifact takes the
+    # update path and does NOT create a run. If a future wandb changes that branch, `promote`
+    # silently starts creating runs and only a live run would reveal it.
+    assert hasattr(wandb.Artifact, "save")
+
+
+def test_artifact_manifest_exists():
+    # promote_model() judges deployability from manifest.entries (a dict keyed by in-artifact
+    # path) instead of downloading the version.
+    assert hasattr(wandb.Artifact, "manifest")

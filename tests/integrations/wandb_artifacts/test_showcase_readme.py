@@ -52,10 +52,10 @@ def test_the_readme_actually_contains_commands():
     """Guard the guard: a regex that silently matches nothing would make every test below vacuous."""
     commands = _readme_commands()
     assert len(commands) >= 3
-    # The pipeline is only end-to-end if every stage that crosses machines is shown. Promotion is
-    # deliberately not here: the CLI can only log a new version, never promote an existing one.
+    # The pipeline is only end-to-end if every stage that crosses machines is shown, promotion
+    # included — until #24 it was the one step that dropped out of the CLI into an SDK snippet.
     joined = " ".join(commands)
-    for expected in ("dataset upload", "model download", "rollout upload"):
+    for expected in ("dataset upload", "model download", "rollout upload", "model promote"):
         assert expected in joined
 
 

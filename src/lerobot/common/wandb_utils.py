@@ -246,7 +246,10 @@ class WandBLogger:
         collection_name = get_safe_wandb_artifact_name(self.cfg.model_artifact_name or self._group)
 
         registry_collection = self.cfg.registered_model_name
-        refusal = registry_link_refusal(model_metadata)
+        refusal = registry_link_refusal(
+            is_self_contained=model_metadata.is_self_contained,
+            base_model_name_or_path=model_metadata.base_model_name_or_path,
+        )
         if registry_collection is not None and refusal is not None:
             logging.warning(
                 f"Not linking {collection_name!r} into Registry collection "

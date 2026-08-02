@@ -13,9 +13,11 @@
 # limitations under the License.
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 
 pytest.importorskip("wandb", reason="wandb is required (install lerobot[training])")
 
@@ -26,9 +28,11 @@ from lerobot.integrations.wandb_artifacts.store import (
     ArtifactTypeMismatchError,
     DownloadDestinationNotEmptyError,
     MaterializedArtifact,
+    RegistryLinkRefusedError,
     declare_input,
     download_artifact,
     link_to_registry,
+    promote_model,
     upload_directory,
 )
 
@@ -443,3 +447,141 @@ def test_declare_input_rejects_a_malformed_ref_before_calling_wandb():
         declare_input(run, "not-a-ref", expected_type="model")
 
     run.use_artifact.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# promote_model
+#
+# These tests prove which SDK calls `promote_model` makes and which it does not. They cannot
+# prove what W&B's servers do with those calls: that assigning an alias to v3 takes it off v2 is
+# enforced server-side, and a fake says yes regardless. `test_wandb_sdk_surface.py` pins that the
+# methods called here still exist on the real package; the alias actually moving was verified by
+# hand against a live project, and is recorded in the PR that added this command.
+# ---------------------------------------------------------------------------
+
+
+class _FakePromotableArtifact(_FakeArtifact):
+    """A committed artifact as ``Api().artifact()`` returns it: aliases, a manifest, no bytes."""
+
+    def __init__(self, *, entries=(SAFETENSORS_SINGLE_FILE,), aliases=("v3",), **kwargs):
+        super().__init__(**kwargs)
+        self.aliases = list(aliases)
+        self.manifest = SimpleNamespace(entries=dict.fromkeys(entries, object()))
+        self.saved = 0
+        self.links = []
+
+    def save(self):
+        self.saved += 1
+
+    def link(self, target_path, aliases=None):
+        self.links.append((target_path, aliases))
+
+
+def _fake_api(artifact, monkeypatch):
+    api = MagicMock()
+    api.artifact.return_value = artifact
+    monkeypatch.setattr(wandb, "Api", lambda *a, **k: api)
+    return api
+
+
+def test_promote_model_aliases_the_existing_version_and_uploads_nothing(monkeypatch):
+    artifact = _FakePromotableArtifact(name="pick-cube-policy:v3", type="model")
+    api = _fake_api(artifact, monkeypatch)
+
+    result = promote_model(
+        "my-team/my-project/pick-cube-policy:v3",
+        alias="production",
+        registry_collection="pick-cube-policy",
+    )
+
+    api.artifact.assert_called_once_with("my-team/my-project/pick-cube-policy:v3")
+    assert artifact.aliases == ["v3", "production"]
+    assert artifact.saved == 1
+    assert artifact.links == [("wandb-registry-model/pick-cube-policy", ["production"])]
+    # Nothing was uploaded: the version promoted is the version asked for, same digest.
+    assert artifact.added_dirs == []
+    assert result.resolved_ref == "my-team/my-project/pick-cube-policy:v3"
+    assert result.digest == "abc123digest"
+    assert result.local_path is None
+    assert result.registry_collection == "pick-cube-policy"
+
+
+def test_promote_model_without_a_collection_touches_only_the_project_alias(monkeypatch):
+    artifact = _FakePromotableArtifact(name="pick-cube-policy:v3", type="model")
+    _fake_api(artifact, monkeypatch)
+
+    result = promote_model("my-team/my-project/pick-cube-policy:v3", alias="production")
+
+    assert artifact.aliases == ["v3", "production"]
+    assert artifact.links == []
+    assert result.registry_collection is None
+
+
+def test_promote_model_is_idempotent_for_an_alias_already_on_the_version(monkeypatch):
+    artifact = _FakePromotableArtifact(name="pick-cube-policy:v3", type="model", aliases=("production",))
+    _fake_api(artifact, monkeypatch)
+
+    promote_model("my-team/my-project/pick-cube-policy:v3", alias="production")
+
+    assert artifact.aliases == ["production"]
+    assert artifact.saved == 0
+
+
+def test_promote_model_rejects_a_non_model_artifact(monkeypatch):
+    artifact = _FakePromotableArtifact(name="pick-cube:v3", type="dataset")
+    _fake_api(artifact, monkeypatch)
+
+    with pytest.raises(ArtifactTypeMismatchError, match="type 'dataset'"):
+        promote_model("my-team/my-project/pick-cube:v3", alias="production")
+
+    assert artifact.saved == 0
+
+
+def test_promote_model_refuses_to_register_a_version_that_cannot_be_rolled_out(monkeypatch):
+    """The manifest is the whole check: an adapter-only version has no `model.safetensors`.
+
+    Refused before the alias is applied — a version left aliased `production` but unlinked is a
+    worse outcome than a command that did nothing.
+    """
+    artifact = _FakePromotableArtifact(
+        name="pick-cube-policy:v3",
+        type="model",
+        entries=("adapter_config.json", "adapter_model.safetensors"),
+        metadata={"base_model_name_or_path": "lerobot/pi0"},
+    )
+    _fake_api(artifact, monkeypatch)
+
+    with pytest.raises(RegistryLinkRefusedError, match="lerobot/pi0"):
+        promote_model(
+            "my-team/my-project/pick-cube-policy:v3",
+            alias="production",
+            registry_collection="pick-cube-policy",
+        )
+
+    assert artifact.saved == 0
+    assert artifact.links == []
+    assert artifact.aliases == ["v3"]
+
+
+def test_promote_model_allows_an_adapter_only_alias_without_a_registry_link(monkeypatch):
+    """Matches `model upload`, which uploads an adapter-only checkpoint and refuses only the link."""
+    artifact = _FakePromotableArtifact(
+        name="pick-cube-policy:v3",
+        type="model",
+        entries=("adapter_config.json", "adapter_model.safetensors"),
+    )
+    _fake_api(artifact, monkeypatch)
+
+    promote_model("my-team/my-project/pick-cube-policy:v3", alias="candidate")
+
+    assert artifact.aliases == ["v3", "candidate"]
+
+
+def test_promote_model_rejects_a_malformed_ref_before_calling_wandb(monkeypatch):
+    api = MagicMock()
+    monkeypatch.setattr(wandb, "Api", lambda *a, **k: api)
+
+    with pytest.raises(ValueError):
+        promote_model("not-a-ref", alias="production")
+
+    api.artifact.assert_not_called()

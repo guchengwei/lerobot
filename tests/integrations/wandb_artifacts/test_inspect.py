@@ -637,7 +637,10 @@ def test_published_metadata_redacts_a_machine_local_base_model_path(tmp_path):
 
     metadata = inspect_model_directory(root)
     payload = metadata.to_wandb_metadata()
-    refusal = registry_link_refusal(metadata)
+    refusal = registry_link_refusal(
+        is_self_contained=metadata.is_self_contained,
+        base_model_name_or_path=metadata.base_model_name_or_path,
+    )
 
     assert metadata.base_model_name_or_path == str(base_model_dir)
     assert str(base_model_dir) not in payload["base_model_name_or_path"]
@@ -654,7 +657,10 @@ def test_published_metadata_keeps_a_hub_repo_id_verbatim(tmp_path):
     metadata = inspect_model_directory(root)
 
     assert metadata.to_wandb_metadata()["base_model_name_or_path"] == "lerobot/pi0"
-    assert "lerobot/pi0" in registry_link_refusal(metadata)
+    assert "lerobot/pi0" in registry_link_refusal(
+        is_self_contained=metadata.is_self_contained,
+        base_model_name_or_path=metadata.base_model_name_or_path,
+    )
 
 
 def test_inspect_model_directory_no_warning_with_full_weights(tmp_path, caplog):

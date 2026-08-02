@@ -35,5 +35,9 @@ _Avoid_: "eval artifact" (nothing here scores the rollout; success counts are su
 The single video file from a rollout artifact that is logged as run media, chosen by a stable sort over `(video_key, chunk_index, file_index)`. In Dataset v3 one `.mp4` holds however many episodes fit under the writer's file-size target, so a representative video is an episode _span_, not one episode. Every other video stays in the Artifact only.
 
 **Registry collection**:
-A named collection inside W&B's unified Registry (`wandb-registry-model/<name>`), populated by linking an existing Artifact collection version into it via `run.link_artifact()`. Distinct from the legacy, now-unused W&B Model Registry (`run.link_model()`, hardcoded to a `model-registry` project) — this integration only uses the unified Registry.
+A named collection inside W&B's unified Registry (`wandb-registry-model/<name>`), populated by linking an existing Artifact collection version into it — via `run.link_artifact()` when a run is already logging that version, or `artifact.link()` when there is no run to speak of (see **Promotion**). Distinct from the legacy, now-unused W&B Model Registry (`run.link_model()`, hardcoded to a `model-registry` project) — this integration only uses the unified Registry.
 _Avoid_: "model registry" (ambiguous between legacy and current)
+
+**Promotion**:
+Moving an alias onto a model version that already exists, and optionally linking that same version into a Registry collection. Uploads nothing and creates no run, so the promoted version is byte-identical to the one a rollout evaluated — re-uploading a downloaded policy would produce a different version with no edge back to that rollout. Whether to promote is a human judgement made from the run; nothing in this integration computes it.
+_Avoid_: "publishing a model" (conflates promotion with `model upload`, which does log a new version)

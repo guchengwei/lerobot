@@ -30,6 +30,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 from packaging.version import Version
 
 from lerobot.utils.import_utils import require_package
@@ -39,9 +40,15 @@ from .refs import ArtifactRef, parse_artifact_ref
 if TYPE_CHECKING:
     import wandb
 
+MODEL_ARTIFACT_TYPE = "model"
+
 
 class ArtifactTypeMismatchError(ValueError):
     """A fetched artifact's declared type doesn't match what the caller expected."""
+
+
+class RegistryLinkRefusedError(ValueError):
+    """A Registry link was requested for a version that cannot be rolled out on its own."""
 
 
 class DownloadDestinationNotEmptyError(ValueError):
@@ -103,6 +110,76 @@ def link_to_registry(
     target_path = f"wandb-registry-model/{collection}"
     run.link_artifact(artifact, target_path=target_path, aliases=list(aliases) if aliases else None)
     return target_path
+
+
+def promote_model(
+    ref: str | ArtifactRef,
+    *,
+    alias: str,
+    registry_collection: str | None = None,
+) -> MaterializedArtifact:
+    """Give an already-logged model version ``alias``, and optionally link *that* version.
+
+    Promotion has to act on the exact immutable version a rollout evaluated. Re-uploading the
+    downloaded policy would produce a different version carrying no edge to the rollout that
+    justified it, so nothing here writes bytes: the version is fetched by reference, aliased in
+    place, and linked as-is.
+
+    Runless by design, unlike every other operation in this module. ``Api().artifact`` reads,
+    ``save()`` on a committed artifact takes the update path rather than logging anything, and
+    ``Artifact.link`` reaches the Registry without a ``Run``. A run here would exist only to
+    exist — no inputs, no outputs, no metrics.
+
+    Deployability is judged from the artifact's file manifest, not from a download and not from
+    its stored ``is_self_contained``: the manifest carries the same file-existence signal
+    ``validate_model_directory`` checks locally, costs no bytes, and is not mutable after the fact.
+
+    Raises:
+        ArtifactTypeMismatchError: ``ref`` is not a ``model`` artifact.
+        RegistryLinkRefusedError: a Registry link was requested for a version that cannot be
+            rolled out on its own. The alias is not applied either — the whole command is refused,
+            because a half-done promotion is worse than none.
+    """
+    parsed = ref if isinstance(ref, ArtifactRef) else parse_artifact_ref(ref)
+    wandb = _wandb_sdk()
+
+    artifact = wandb.Api().artifact(str(parsed))
+    if artifact.type != MODEL_ARTIFACT_TYPE:
+        raise ArtifactTypeMismatchError(
+            f"Expected an artifact of type {MODEL_ARTIFACT_TYPE!r} but {parsed} is of type {artifact.type!r}."
+        )
+
+    if registry_collection is not None:
+        # Deferred: `inspect` pulls datasets/pandas/pyarrow (the `dataset` extra), and importing
+        # this module must stay possible on a base install — see the module docstring.
+        from .inspect import registry_link_refusal
+
+        refusal = registry_link_refusal(
+            is_self_contained=SAFETENSORS_SINGLE_FILE in artifact.manifest.entries,
+            base_model_name_or_path=(artifact.metadata or {}).get("base_model_name_or_path"),
+        )
+        if refusal is not None:
+            raise RegistryLinkRefusedError(
+                f"Refusing to link {artifact.qualified_name} into Registry collection "
+                f"{registry_collection!r}: {refusal}."
+            )
+
+    if alias not in artifact.aliases:
+        artifact.aliases = [*artifact.aliases, alias]
+        artifact.save()
+
+    if registry_collection is not None:
+        artifact.link(f"wandb-registry-model/{registry_collection}", aliases=[alias])
+
+    return MaterializedArtifact(
+        requested_ref=str(parsed),
+        resolved_ref=artifact.qualified_name,
+        local_path=None,
+        version=artifact.version,
+        digest=artifact.digest,
+        metadata=dict(artifact.metadata or {}),
+        registry_collection=registry_collection,
+    )
 
 
 def upload_directory(
