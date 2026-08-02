@@ -211,32 +211,35 @@ Nothing is promoted automatically. When a rollout justifies promotion, promote *
 the rollout evaluated** — `pick-cube-policy:v3`, whatever `:candidate` resolved to when you
 downloaded it, which the rollout run recorded as `model_artifact_resolved_ref`.
 
-`lerobot-wandb model upload` cannot do this: it always logs a _new_ artifact version from a local
-directory. Re-uploading the downloaded policy would produce a different version, carrying no edge
-to the rollout that justified it, while the rollout stays attached to the version you actually
-tested. That is the opposite of what promotion is for.
+Do not re-upload the downloaded policy to do this. `lerobot-wandb model upload` always logs a _new_
+version from a local directory, which would carry no edge to the rollout that justified it while
+the rollout stayed attached to the version you actually tested. `model promote` acts on the
+existing version instead, and uploads nothing:
 
-Until the CLI grows a promote command (tracked in #24), move the alias and add the Registry link on
-the existing version, either in the W&B UI or with the SDK:
-
-```python
-import wandb
-
-api = wandb.Api()
-artifact = api.artifact("my-team/so101-pick-cube/pick-cube-policy:v3", type="model")
-
-# Project-collection alias.
-artifact.aliases.append("production")
-artifact.save()
-
-# Registry aliases are separate: they are assigned on the link, not on the artifact above.
-with wandb.init(entity="my-team", project="so101-pick-cube", job_type="promote") as run:
-    run.link_artifact(
-        artifact,
-        target_path="wandb-registry-model/pick-cube-policy",
-        aliases=["production"],
-    )
+```bash
+lerobot-wandb model promote --ref my-team/so101-pick-cube/pick-cube-policy:v3 \
+    --alias production --registry-collection pick-cube-policy
 ```
+
+The alias lands on the project collection and on the Registry link, the same two places
+`model upload --registry-collection` puts it. The printed digest is the one you started with —
+that is how you check no bytes moved.
+
+Refusals worth knowing before you need them. A ref that is not a `model` artifact is rejected, as
+everywhere else. And a version that cannot be loaded as a policy on its own is refused a Registry
+link, since a Registry collection is where a team looks for something deployable — either because
+it has no `config.json` (a periodic training checkpoint is uploaded as weights alone) or because
+it is an adapter-only checkpoint whose base model is not bundled. That check reads the version's
+file manifest, so it costs no download. Dropping `--registry-collection` still lets you alias such
+a version inside the project, matching what `model upload` already allows.
+
+When you do pass `--registry-collection`, the Registry link happens before the project alias
+moves. There is no transaction over the pair, and this is the order where a failed link leaves
+nothing changed at all rather than a `production` alias pointing at a version that never reached
+the Registry.
+
+Whether a rollout justifies promoting at all is your call, made by looking at the run. Nothing in
+this pipeline computes it.
 
 ## Where things live afterwards
 

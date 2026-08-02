@@ -182,8 +182,8 @@ def _publishable_base_model_name(base_model_name_or_path: str | None) -> str | N
     return base_model_name_or_path
 
 
-def registry_link_refusal(metadata: ModelDirectoryMetadata) -> str | None:
-    """Why ``metadata``'s model must not be linked into the Registry, or ``None`` if it may be.
+def registry_link_refusal(*, is_self_contained: bool, base_model_name_or_path: str | None) -> str | None:
+    """Why this model must not be linked into the Registry, or ``None`` if it may be.
 
     A Registry collection is where a team looks for something deployable. An adapter-only
     checkpoint whose base model isn't bundled cannot be rolled out from the artifact alone — the
@@ -191,12 +191,17 @@ def registry_link_refusal(metadata: ModelDirectoryMetadata) -> str | None:
     that only exists on the training machine — so linking it would put an undeployable version
     where deployable ones live. The artifact still uploads; only the Registry claim is refused.
 
-    The returned string is stored in artifact metadata by both callers, so it names the base model
+    Takes the two values it judges rather than a :class:`ModelDirectoryMetadata`, because the same
+    rule has to apply to a version that was never inspected locally: ``model promote`` reads
+    ``is_self_contained`` off a remote artifact's file manifest and its base model off that
+    artifact's stored metadata. One rule, two ways of learning its inputs.
+
+    The returned string is stored in artifact metadata by its callers, so it names the base model
     through :func:`_publishable_base_model_name` rather than verbatim.
     """
-    if metadata.is_self_contained:
+    if is_self_contained:
         return None
-    base_model = _publishable_base_model_name(metadata.base_model_name_or_path) or "undeclared"
+    base_model = _publishable_base_model_name(base_model_name_or_path) or "undeclared"
     return (
         f"the checkpoint has only PEFT adapter weights and its base model ({base_model}) is not "
         "bundled, so the artifact cannot be rolled out on its own"

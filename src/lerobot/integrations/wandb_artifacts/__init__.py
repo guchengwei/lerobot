@@ -38,9 +38,11 @@ _LAZY_EXPORTS = {
     "ArtifactTypeMismatchError": ".store",
     "DownloadDestinationNotEmptyError": ".store",
     "MaterializedArtifact": ".store",
+    "RegistryLinkRefusedError": ".store",
     "declare_input": ".store",
     "download_artifact": ".store",
     "link_to_registry": ".store",
+    "promote_model": ".store",
     "upload_directory": ".store",
 }
 
@@ -60,9 +62,11 @@ if TYPE_CHECKING:
         ArtifactTypeMismatchError,
         DownloadDestinationNotEmptyError,
         MaterializedArtifact,
+        RegistryLinkRefusedError,
         declare_input,
         download_artifact,
         link_to_registry,
+        promote_model,
         upload_directory,
     )
 
@@ -87,12 +91,14 @@ __all__ = [
     "MaterializedArtifact",
     "ModelDirectoryError",
     "ModelDirectoryMetadata",
+    "RegistryLinkRefusedError",
     "declare_input",
     "download_artifact",
     "inspect_dataset_directory",
     "inspect_model_directory",
     "link_to_registry",
     "parse_artifact_ref",
+    "promote_model",
     "registry_link_refusal",
     "upload_directory",
     "validate_dataset_directory",

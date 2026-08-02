@@ -855,3 +855,71 @@ def test_model_upload_still_registers_a_full_weights_checkpoint(tmp_path, monkey
     assert upload_calls[0]["registry_collection"] == "pick-cube-policy"
     assert "registry_link_refused_reason" not in upload_calls[0]["metadata"]
     assert "Linked into registry collection: pick-cube-policy" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# model promote
+# ---------------------------------------------------------------------------
+
+
+def test_model_promote_rejects_malformed_ref_before_touching_wandb(monkeypatch):
+    promote_calls = []
+    monkeypatch.setattr(cli, "promote_model", lambda *a, **k: promote_calls.append((a, k)))
+
+    with pytest.raises(ValueError):
+        cli.main(["model", "promote", "--ref", "not-a-valid-ref", "--alias", "production"])
+
+    assert promote_calls == []
+
+
+def test_model_promote_passes_the_parsed_ref_through_and_never_starts_a_run(monkeypatch, capsys):
+    """`promote` is the one command with no `wandb.init`: it aliases a version that already exists.
+
+    Proves the CLI wiring and that no run is created. What the server does with the alias is
+    outside what any mocked test can see — see the note in `test_store.py`.
+    """
+    init_calls = []
+    monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: init_calls.append(kwargs))
+
+    captured = {}
+
+    def _fake_promote(ref, *, alias, registry_collection=None):
+        captured["ref"] = str(ref)
+        captured["alias"] = alias
+        captured["registry_collection"] = registry_collection
+        return MaterializedArtifact(
+            requested_ref=str(ref),
+            resolved_ref="my-team/my-project/pick-cube-policy:v3",
+            local_path=None,
+            version="v3",
+            digest="abc123digest",
+            metadata={},
+            registry_collection=registry_collection,
+        )
+
+    monkeypatch.setattr(cli, "promote_model", _fake_promote)
+
+    cli.main(
+        [
+            "model",
+            "promote",
+            "--ref",
+            "my-team/my-project/pick-cube-policy:v3",
+            "--alias",
+            "production",
+            "--registry-collection",
+            "pick-cube-policy",
+        ]
+    )
+
+    assert init_calls == []
+    assert captured == {
+        "ref": "my-team/my-project/pick-cube-policy:v3",
+        "alias": "production",
+        "registry_collection": "pick-cube-policy",
+    }
+    out = capsys.readouterr().out
+    assert "my-team/my-project/pick-cube-policy:v3" in out
+    assert "production" in out
+    assert "abc123digest" in out
+    assert "pick-cube-policy" in out

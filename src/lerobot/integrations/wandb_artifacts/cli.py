@@ -34,6 +34,9 @@ lerobot-wandb model upload --root ./outputs/train/pretrained_model --entity my-t
 
 lerobot-wandb model download --ref my-team/my-project/pick-cube-policy:latest --root ./policy
 
+lerobot-wandb model promote --ref my-team/my-project/pick-cube-policy:v3 --alias production \
+    --registry-collection pick-cube-policy
+
 lerobot-wandb rollout upload --root ./rollout_pick-cube --entity my-team --project my-project \
     --name pick-cube-rollout --model-ref my-team/my-project/pick-cube-policy:v3 \
     --episodes-succeeded 7
@@ -62,10 +65,15 @@ from .rollout import (
     select_representative_video,
     validate_success_count,
 )
-from .store import declare_input, download_artifact, upload_directory
+from .store import (
+    MODEL_ARTIFACT_TYPE,
+    declare_input,
+    download_artifact,
+    promote_model,
+    upload_directory,
+)
 
 DATASET_ARTIFACT_TYPE = "dataset"
-MODEL_ARTIFACT_TYPE = "model"
 
 
 def cmd_dataset_upload(args: argparse.Namespace) -> None:
@@ -125,7 +133,10 @@ def cmd_model_upload(args: argparse.Namespace) -> None:
 
     artifact_metadata = metadata.to_wandb_metadata()
     registry_collection = args.registry_collection
-    refusal = registry_link_refusal(metadata)
+    refusal = registry_link_refusal(
+        is_self_contained=metadata.is_self_contained,
+        base_model_name_or_path=metadata.base_model_name_or_path,
+    )
     if registry_collection is not None and refusal is not None:
         logging.warning(
             f"Not linking into Registry collection {registry_collection!r}: {refusal}. The "
@@ -186,6 +197,23 @@ def cmd_model_download(args: argparse.Namespace) -> None:
         f"Downloaded model artifact {result.resolved_ref} to: {result.local_path} "
         "(use directly as a rollout policy path)"
     )
+
+
+def cmd_model_promote(args: argparse.Namespace) -> None:
+    # Fail fast on a malformed ref before any network call.
+    parsed = parse_artifact_ref(args.ref)
+
+    result = promote_model(
+        parsed,
+        alias=args.alias,
+        registry_collection=args.registry_collection,
+    )
+
+    print(f"Promoted model artifact: {result.resolved_ref}")
+    print(f"Alias applied: {args.alias}")
+    print(f"Digest (unchanged — nothing was uploaded): {result.digest}")
+    if result.registry_collection:
+        print(f"Linked into registry collection: {result.registry_collection}")
 
 
 def cmd_rollout_upload(args: argparse.Namespace) -> None:
@@ -312,6 +340,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_download_args(model_download_parser)
     model_download_parser.set_defaults(func=cmd_model_download)
+
+    model_promote_parser = model_action_subparsers.add_parser(
+        "promote",
+        help="Alias an existing model version, and optionally link that same version into the "
+        "Registry. Uploads nothing.",
+    )
+    model_promote_parser.add_argument(
+        "--ref",
+        required=True,
+        help="Model version to promote: entity/project/name:version_or_alias. Prefer the immutable "
+        "version a rollout actually evaluated (its 'model_artifact_resolved_ref').",
+    )
+    model_promote_parser.add_argument(
+        "--alias",
+        required=True,
+        help="Alias to move onto this version, e.g. 'production'.",
+    )
+    model_promote_parser.add_argument(
+        "--registry-collection",
+        default=None,
+        help="If set, also link this version into that unified-Registry collection "
+        "(wandb-registry-model/<name>).",
+    )
+    model_promote_parser.set_defaults(func=cmd_model_promote)
 
     rollout_parser = resource_subparsers.add_parser("rollout", help="Upload a rollout result.")
     rollout_action_subparsers = rollout_parser.add_subparsers(dest="action", required=True)
