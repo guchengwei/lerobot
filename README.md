@@ -37,6 +37,32 @@ lerobot-info
 > [!IMPORTANT]
 > For detailed installation guide, please see the [Installation Documentation](https://huggingface.co/docs/lerobot/installation).
 
+## This fork: W&B-native SO-101 workflow
+
+This fork adds an optional W&B Artifacts and Registry path for moving finalized datasets and
+policies between a recording machine, a training machine, and a robot machine. The worked example
+keeps W&B outside the robot control loop and uses no Hugging Face Hub storage on that path.
+
+> [!IMPORTANT]
+> `pip install lerobot` installs the upstream package and does **not** include this fork's
+> `lerobot-wandb` command. Clone this repository and run it from the source environment:
+
+```bash
+git clone https://github.com/guchengwei/lerobot.git
+cd lerobot
+uv sync --locked --extra core_scripts --extra feetech --extra training
+uv run lerobot-wandb --help
+```
+
+Then follow the **[worked end-to-end W&B manual](./examples/wandb_showcase/README.md)**. It covers
+recording, dataset publication, training from an immutable Artifact version, model download,
+real-robot rollout, rollout publication with lineage, and promotion of the exact evaluated model
+version. Commands in that manual assume the virtual environment is activated; alternatively prefix
+each command with `uv run`.
+
+The integration's terminology and architectural boundaries are documented in
+[`CONTEXT.md`](./CONTEXT.md).
+
 ## Robots & Control
 
 <div align="center">
