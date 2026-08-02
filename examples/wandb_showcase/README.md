@@ -4,9 +4,10 @@ Record on a real robot, publish the dataset, train from that exact dataset versi
 trained policy, roll it out on the robot, and publish the rollout with a lineage edge back to the
 model that produced it — with W&B as the only remote store.
 
-Every command below is copy-pasteable and exercised by
-`tests/integrations/wandb_artifacts/test_showcase_readme.py`, which extracts each `lerobot-wandb`
-invocation from this file and parses it against the real CLI. A flag that stops existing fails that
+The commands below are copy-pasteable after replacing the setup and runtime values explicitly
+marked in steps 0, 4, and 6. They are exercised by
+`tests/integrations/wandb_artifacts/test_showcase_readme.py`, which expands those documented values,
+extracts each command, and parses it against the real CLI. A flag that stops existing fails that
 test.
 
 ## Pipeline
@@ -48,16 +49,21 @@ Read this before the commands; it is the part that keeps you from being misled.
 
 ## 0. Prerequisites
 
+Run this from the root of a clone of this fork. Replace `your-wandb-entity` with the W&B entity that
+owns the project before continuing.
+
 ```bash
 uv sync --locked --extra core_scripts --extra feetech --extra training
+source .venv/bin/activate
 wandb login
-export WANDB_ENTITY=my-team
-export WANDB_PROJECT=so101-pick-cube
+export WANDB_ENTITY="your-wandb-entity"
+export WANDB_PROJECT="so101-pick-cube"
 ```
 
 `core_scripts` pulls in the dataset and hardware stacks, `feetech` the SO-101's motor bus, and
-`training` both `wandb` and `accelerate`. Everything below assumes an SO-101 follower on
-`/dev/ttyACM0` and a leader on `/dev/ttyACM1`; adjust ports and camera indices to your setup.
+`training` both `wandb` and `accelerate`. Activating `.venv` is what makes the bare `lerobot-*` and
+`wandb` commands below available. Everything below assumes an SO-101 follower on `/dev/ttyACM0` and
+a leader on `/dev/ttyACM1`; adjust ports and camera indices to your setup.
 
 ## 1. Record a teaching dataset
 
@@ -84,14 +90,15 @@ dataset costs you no run and no upload.
 ```bash
 lerobot-wandb dataset upload \
   --root ./data/pick-cube \
-  --entity my-team \
-  --project so101-pick-cube \
+  --entity "$WANDB_ENTITY" \
+  --project "$WANDB_PROJECT" \
   --name pick-cube \
   --alias raw
 ```
 
-Prints the resolved immutable ref, e.g. `my-team/so101-pick-cube/pick-cube:v0`. Record that; it is
-what makes a later training run reproducible.
+Prints the resolved immutable ref, for example
+`your-wandb-entity/so101-pick-cube/pick-cube:v0`. Record that; it is what makes a later training run
+reproducible.
 
 ## 3. Train directly from the Artifact
 
@@ -101,7 +108,7 @@ requested ref and the resolved `:vN`.
 
 ```bash
 lerobot-train \
-  --dataset.artifact_ref=my-team/so101-pick-cube/pick-cube:raw \
+  --dataset.artifact_ref="$WANDB_ENTITY/$WANDB_PROJECT/pick-cube:raw" \
   --policy.type=act \
   --policy.device=cuda \
   --output_dir=outputs/train/act_pick_cube \
@@ -109,8 +116,8 @@ lerobot-train \
   --batch_size=8 \
   --steps=100000 \
   --wandb.enable=true \
-  --wandb.project=so101-pick-cube \
-  --wandb.entity=my-team \
+  --wandb.project="$WANDB_PROJECT" \
+  --wandb.entity="$WANDB_ENTITY" \
   --wandb.model_artifact_name=pick-cube-policy \
   --wandb.model_artifact_aliases='["candidate"]' \
   --wandb.registered_model_name=pick-cube-policy \
@@ -146,13 +153,20 @@ where you pointed it.
 
 ```bash
 lerobot-wandb model download \
-  --ref my-team/so101-pick-cube/pick-cube-policy:candidate \
+  --ref "$WANDB_ENTITY/$WANDB_PROJECT/pick-cube-policy:candidate" \
   --root ./policies/pick-cube-candidate
 ```
 
-The resulting directory is usable directly as `--policy.path`. **Write down the resolved
-`:vN` it prints** — that, not `:candidate`, is what the robot is about to run, and it is what step 6
-must record. The alias may move between now and then; the version cannot.
+The resulting directory is usable directly as `--policy.path`. The command prints the immutable
+resolved version the robot is about to run. Set `MODEL_VERSION` to that version before continuing;
+replace `v0` below rather than assuming your first useful model has any particular number.
+
+```bash
+export MODEL_VERSION="v0"
+```
+
+The alias may move between now and the rollout upload. `MODEL_VERSION` must keep naming the version
+that was actually downloaded and run.
 
 ## 5. Roll out on the real robot
 
@@ -176,22 +190,25 @@ Count the successes yourself while it runs. You will pass that number in the nex
 
 ## 6. Publish the rollout with lineage back to the model
 
-Disconnect the robot first; this step is pure upload.
+Disconnect the robot first; this step is pure upload. Set `EPISODES_SUCCEEDED` to the count you
+observed; `14` is only an example for a 20-episode rollout.
 
 ```bash
+export EPISODES_SUCCEEDED="14"
+
 lerobot-wandb rollout upload \
   --root ./data/rollout_pick-cube \
-  --entity my-team \
-  --project so101-pick-cube \
+  --entity "$WANDB_ENTITY" \
+  --project "$WANDB_PROJECT" \
   --name pick-cube-rollout \
-  --model-ref my-team/so101-pick-cube/pick-cube-policy:v3 \
-  --episodes-succeeded 14
+  --model-ref "$WANDB_ENTITY/$WANDB_PROJECT/pick-cube-policy:$MODEL_VERSION" \
+  --episodes-succeeded "$EPISODES_SUCCEEDED"
 ```
 
-Note the `:v3` rather than `:candidate`. The ref is resolved again at upload time, so passing the
-alias would record whatever it points at _now_ — not necessarily the version the robot ran, if
-someone promoted a new candidate in between. Recording a model the rollout didn't use is worse than
-recording nothing, because it looks authoritative.
+Note the immutable `$MODEL_VERSION` rather than `:candidate`. The ref is resolved again at upload
+time, so passing the alias would record whatever it points at _now_ — not necessarily the version
+the robot ran, if someone promoted a new candidate in between. Recording a model the rollout didn't
+use is worse than recording nothing, because it looks authoritative.
 
 This creates a run that declares the model as an **input** — resolved for lineage, never
 downloaded — and the rollout as an **output** of type `rollout`, distinct from a training dataset
@@ -208,8 +225,8 @@ deterministically. The complete rollout — every episode, every camera — live
 ## 7. Promote what worked
 
 Nothing is promoted automatically. When a rollout justifies promotion, promote **the exact version
-the rollout evaluated** — `pick-cube-policy:v3`, whatever `:candidate` resolved to when you
-downloaded it, which the rollout run recorded as `model_artifact_resolved_ref`.
+the rollout evaluated** — the version in `$MODEL_VERSION`, which the rollout run also records as
+`model_artifact_resolved_ref`.
 
 Do not re-upload the downloaded policy to do this. `lerobot-wandb model upload` always logs a _new_
 version from a local directory, which would carry no edge to the rollout that justified it while
@@ -217,8 +234,10 @@ the rollout stayed attached to the version you actually tested. `model promote` 
 existing version instead, and uploads nothing:
 
 ```bash
-lerobot-wandb model promote --ref my-team/so101-pick-cube/pick-cube-policy:v3 \
-    --alias production --registry-collection pick-cube-policy
+lerobot-wandb model promote \
+  --ref "$WANDB_ENTITY/$WANDB_PROJECT/pick-cube-policy:$MODEL_VERSION" \
+  --alias production \
+  --registry-collection pick-cube-policy
 ```
 
 The alias lands on the project collection and on the Registry link, the same two places
