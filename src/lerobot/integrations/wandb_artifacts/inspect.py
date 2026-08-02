@@ -162,8 +162,24 @@ class ModelDirectoryMetadata:
             "policy_type": self.policy_type,
             "git_commit": self.git_commit,
             "is_self_contained": self.is_self_contained,
-            "base_model_name_or_path": self.base_model_name_or_path,
+            "base_model_name_or_path": _publishable_base_model_name(self.base_model_name_or_path),
         }
+
+
+def _publishable_base_model_name(base_model_name_or_path: str | None) -> str | None:
+    """``base_model_name_or_path`` with a machine-local path replaced by a non-identifying stand-in.
+
+    A PEFT base is either a Hub repo id (``lerobot/pi0``) or a path on the training machine. The
+    second is the uploader's filesystem layout, so it stops at this boundary: the dataclass keeps
+    the real value, since callers on that machine need it, while everything published to W&B —
+    artifact metadata and the refusal reason stored beside it — gets the stand-in. The full path
+    is already in the warning ``inspect_model_directory`` logs, which is where it is actionable.
+    """
+    if base_model_name_or_path is None:
+        return None
+    if Path(base_model_name_or_path).is_absolute():
+        return "a local path on the uploading machine"
+    return base_model_name_or_path
 
 
 def registry_link_refusal(metadata: ModelDirectoryMetadata) -> str | None:
@@ -174,10 +190,13 @@ def registry_link_refusal(metadata: ModelDirectoryMetadata) -> str | None:
     base is resolved from ``base_model_name_or_path`` at load time, off the network or off a path
     that only exists on the training machine — so linking it would put an undeployable version
     where deployable ones live. The artifact still uploads; only the Registry claim is refused.
+
+    The returned string is stored in artifact metadata by both callers, so it names the base model
+    through :func:`_publishable_base_model_name` rather than verbatim.
     """
     if metadata.is_self_contained:
         return None
-    base_model = metadata.base_model_name_or_path or "(undeclared)"
+    base_model = _publishable_base_model_name(metadata.base_model_name_or_path) or "undeclared"
     return (
         f"the checkpoint has only PEFT adapter weights and its base model ({base_model}) is not "
         "bundled, so the artifact cannot be rolled out on its own"
