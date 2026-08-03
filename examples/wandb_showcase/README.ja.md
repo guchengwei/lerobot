@@ -50,6 +50,10 @@ model byte を移動しません。
 この fork を clone した repository root で実行してください。`your-wandb-entity` は、自分の W&B
 entity に置き換えます。
 
+以下の command は Linux の Bash-compatible shell を前提にしています。Windows PowerShell では
+`.venv\Scripts\Activate.ps1` で environment を有効化し、`/dev/ttyACM*` を実機に対応する `COM` port に
+置き換えてください。それ以外の CLI argument は同じです。
+
 ```bash
 uv sync --locked --extra core_scripts --extra feetech --extra training
 source .venv/bin/activate
@@ -204,6 +208,10 @@ training dataset と区別された `rollout` Artifact として publish され�
 frame 数、duration、requested/resolved policy ref、代表 video が記録され、完全な rollout data は Artifact に
 保存されます。
 
+> **代表 video について:** Dataset v3 では、1 つの `.mp4` に file-size target の範囲で複数 episode が
+> 連結される場合があります。そのため W&B UI に表示される clip は単一 episode とは限りません。対象の
+> episode は Run summary の `representative_video_episodes` に記録されます。
+
 ## 7. 評価済み policy を promote する
 
 rollout で評価した **同じ immutable version** を promote します。download 済み directory を再 upload すると
@@ -219,6 +227,10 @@ lerobot-wandb model promote \
 `model promote` は model byte を upload せず、既存 version の alias と Registry link を更新します。
 model Artifact ではない ref、weight のみの periodic checkpoint、adapter-only policy は deployable な Registry
 entry として拒否されます。
+
+Registry link は project alias を移動する前に試行されます。2 つの server-side write をまとめる transaction は
+ないため、この順序にすることで Registry link が失敗した場合でも `production` alias は変更されません。
+rollout の結果が promotion に十分かどうかは operator が Run を確認して判断します。
 
 ## 保存先と lineage
 
