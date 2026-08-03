@@ -16,7 +16,6 @@
 import re
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).parents[3]
 SHOWCASE = REPO_ROOT / "examples" / "wandb_showcase"
 ENGLISH = SHOWCASE / "README.md"
@@ -30,7 +29,7 @@ def _bash_blocks(path: Path) -> list[str]:
     return [block.strip() for block in _BASH_BLOCK.findall(path.read_text())]
 
 
-def test_manuals_link_to_each_other_and_render_local_diagrams():
+def test_manuals_link_to_each_other_and_render_local_diagrams() -> None:
     english = ENGLISH.read_text()
     japanese = JAPANESE.read_text()
 
@@ -46,11 +45,11 @@ def test_manuals_link_to_each_other_and_render_local_diagrams():
         assert diagram.stat().st_size > 5_000
 
 
-def test_localized_manual_uses_the_same_commands_as_english():
+def test_localized_manual_uses_the_same_commands_as_english() -> None:
     assert _bash_blocks(JAPANESE) == _bash_blocks(ENGLISH)
 
 
-def test_japanese_manual_keeps_product_and_runtime_terms_in_english():
+def test_japanese_manual_keeps_product_and_runtime_terms_in_english() -> None:
     japanese = JAPANESE.read_text()
     for term in (
         "Artifact",
