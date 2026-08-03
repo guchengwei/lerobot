@@ -85,7 +85,7 @@ def test_root_readme_onboards_the_fork_before_the_upstream_package():
     text = ROOT_README.read_text()
     fork_start = text.index("## This fork: W&B-native SO-101 workflow")
     quick_start = text.index("## Quick Start")
-    pypi_install = text.index("pip install lerobot")
+    pypi_install = text.index("pip install lerobot", quick_start)
 
     assert fork_start < quick_start < pypi_install
     fork_section = text[fork_start:quick_start]
@@ -101,6 +101,7 @@ def test_showcase_declares_and_reuses_operator_values():
     assert env["WANDB_ENTITY"] == "your-wandb-entity"
     assert env["WANDB_PROJECT"] == "so101-pick-cube"
     assert re.fullmatch(r"[^/]+/[^/]+/pick-cube-policy:v\d+", env["MODEL_REF"])
+    assert env["MODEL_REF"].startswith(f'{env["WANDB_ENTITY"]}/{env["WANDB_PROJECT"]}/')
     assert env["EPISODES_SUCCEEDED"].isdigit()
     assert "source .venv/bin/activate" in text
     assert "my-team" not in text
@@ -114,7 +115,7 @@ def test_showcase_declares_and_reuses_operator_values():
     assert '--episodes-succeeded "$EPISODES_SUCCEEDED"' in commands
 
     assert text.index('export WANDB_ENTITY="') < text.index("lerobot-wandb dataset upload")
-    assert text.index('export MODEL_REF="') < text.index("lerobot-rollout")
+    assert text.index('export MODEL_REF="') < text.index("--strategy.type=episodic")
     assert text.index('export EPISODES_SUCCEEDED="') < text.index("lerobot-wandb rollout upload")
 
 
