@@ -101,7 +101,7 @@ def test_showcase_declares_and_reuses_operator_values():
     assert env["WANDB_ENTITY"] == "your-wandb-entity"
     assert env["WANDB_PROJECT"] == "so101-pick-cube"
     assert re.fullmatch(r"[^/]+/[^/]+/pick-cube-policy:v\d+", env["MODEL_REF"])
-    assert env["MODEL_REF"].startswith(f'{env["WANDB_ENTITY"]}/{env["WANDB_PROJECT"]}/')
+    assert env["MODEL_REF"].startswith(f"{env['WANDB_ENTITY']}/{env['WANDB_PROJECT']}/")
     assert env["EPISODES_SUCCEEDED"].isdigit()
     assert "source .venv/bin/activate" in text
     assert "my-team" not in text
