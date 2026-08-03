@@ -36,23 +36,31 @@ Solid arrows move bytes. The Registry link and the policy-to-rollout lineage edg
 
 ## What this example is and is not
 
+Read this before the commands; it is the part that keeps you from being misled.
+
 - **W&B is the only remote store here.** Nothing in this example pushes to the Hugging Face Hub.
-- **Local disk remains the runtime cache and recording buffer.** Artifacts are materialized before
-  LeRobot reads them; the robot does not use W&B as a filesystem.
-- **No W&B call happens inside the robot control loop.** Publishing is a separate operation after
-  recording or rollout.
+  `lerobot-wandb` never touches the Hub.
+- **Local disk stays the runtime cache and recording buffer.** Artifacts are materialized to disk
+  before anything reads them. W&B is a durable store for finished artifacts, not a filesystem the
+  robot reaches through.
+- **No W&B call happens inside the robot control loop.** Publishing is a separate step you run after
+  recording or rollout, with the robot disconnected.
 - **Aliases are mutable; versions are immutable.** `latest` and `candidate` can move; `v3` cannot.
-- **Training records the immutable dataset version it actually used.** Passing an alias does not
-  weaken the recorded lineage.
+- **Training records the immutable version it actually trained on.** You may pass a mutable alias;
+  the Run records the resolved `vN`, so it remains reproducible after the alias moves.
 - **A candidate or Registry link is not production approval.** Applying `production` to the exact
   evaluated version is the deliberate promotion step.
-- **Rollout success counts are supplied by the operator.** This workflow does not score physical
-  success automatically.
+- **Rollout success counts are supplied by the operator.** Nothing here scores physical success
+  automatically; pass the count from your own judgement.
 
 ## 0. Prerequisites
 
 Run this from the root of a clone of this fork. Replace `your-wandb-entity` with the W&B entity that
 owns the project.
+
+The worked commands target Linux with a Bash-compatible shell. On Windows PowerShell, activate the
+environment with `.venv\Scripts\Activate.ps1` and replace `/dev/ttyACM*` device paths with the
+corresponding `COM` ports. The remaining CLI arguments are the same.
 
 ```bash
 uv sync --locked --extra core_scripts --extra feetech --extra training
@@ -85,8 +93,9 @@ lerobot-record \
 
 ## 2. Publish the dataset as an Artifact
 
-The local directory is validated before a W&B Run is created: metadata must parse, Parquet must
-match the declared schema, referenced videos must exist, and indices must agree.
+The directory is fully validated locally before a W&B Run is created: metadata must parse, Parquet
+must match the declared schema, referenced videos must exist, and indices must agree. A malformed
+dataset costs you no Run and no upload.
 
 ```bash
 lerobot-wandb dataset upload \
@@ -103,8 +112,9 @@ starts, even though the next command requests the mutable `raw` alias.
 
 ## 3. Train directly from the Artifact
 
-Exactly one of `dataset.repo_id` and `dataset.artifact_ref` may be set. The Artifact is downloaded
-under `output_dir` before the dataset object is built.
+Exactly one of `dataset.repo_id` and `dataset.artifact_ref` may be set. The Artifact is materialized
+under `output_dir` before any dataset object is built, and the Run records both the requested ref and
+the resolved `vN`.
 
 ```bash
 lerobot-train \
@@ -124,26 +134,31 @@ lerobot-train \
   --policy.push_to_hub=false
 ```
 
-`wandb.model_artifact_name` publishes the final checkpoint as a versioned model Artifact.
-`wandb.registered_model_name` additionally links a deployable final policy into the Registry
-collection `wandb-registry-model/pick-cube-policy`.
+`wandb.model_artifact_name` publishes the final checkpoint as its own versioned model Artifact,
+separate from periodic per-checkpoint uploads. `wandb.registered_model_name` additionally links a
+deployable final policy into the Registry collection `wandb-registry-model/pick-cube-policy`.
 
-Resume with the saved config, not `output_dir` alone:
+Resuming works without downloading the dataset again. Resume with the saved config, not
+`output_dir` alone:
 
 ```bash
 lerobot-train --resume=true \
   --config_path=outputs/train/act_pick_cube/checkpoints/last/pretrained_model/train_config.json
 ```
 
-The already-materialized dataset is reused and its identity is checked against the download
-sidecar.
+The already-materialized dataset under the original Run's `output_dir` is reused, and its identity
+is checked against the sidecar written by the first download before training resumes.
 
-> **PEFT/LoRA:** an adapter-only checkpoint may be uploaded, but it is not linked into the Registry
-> because it cannot be loaded as a standalone policy. Publish a merged checkpoint for deployment.
+> **PEFT/LoRA:** an adapter-only checkpoint is uploaded but is not linked into the Registry. Its
+> base model is read verbatim from `adapter_config.json` at load time and is never rebased on the
+> downloaded directory, so the Artifact cannot be rolled out on its own. The refusal reason is
+> recorded as `registry_link_refused_reason`. Publish a merged checkpoint for deployment.
 
 ## 4. Fetch the trained policy on the robot machine
 
-The download is staged, validated as a loadable policy checkpoint, and only then moved to `root`.
+The command downloads transactionally into a staging directory, validates that the result is a
+loadable policy checkpoint, and only then moves it to `root`. An interrupted or invalid download
+does not leave a half-written policy at the destination.
 
 ```bash
 lerobot-wandb model download \
@@ -158,12 +173,13 @@ example; do not infer a version number from the alias.
 export MODEL_REF="your-wandb-entity/so101-pick-cube/pick-cube-policy:v0"
 ```
 
-`candidate` may move later. `MODEL_REF` must continue to identify the policy that was actually
-downloaded and run.
+The resulting directory is usable directly as `policy.path`. `candidate` may move later;
+`MODEL_REF` must continue to identify the policy that was actually downloaded and run.
 
 ## 5. Roll out on the real robot
 
-This is standard `lerobot-rollout` and is offline with respect to W&B.
+This is standard `lerobot-rollout` and is offline with respect to W&B. The `rollout_` prefix on the
+dataset name is required by the rollout config.
 
 ```bash
 lerobot-rollout \
@@ -178,12 +194,12 @@ lerobot-rollout \
   --dataset.push_to_hub=false
 ```
 
-Count successful episodes while the rollout runs.
+Count successful episodes while the rollout runs. You will supply that number in the next step.
 
 ## 6. Publish the rollout with policy lineage
 
-Disconnect the robot first. Set `EPISODES_SUCCEEDED` to the observed count; `14` is only an example
-for a 20-episode rollout.
+Disconnect the robot first; this step is pure upload. Set `EPISODES_SUCCEEDED` to the observed
+count. `14` is only an example for a 20-episode rollout.
 
 ```bash
 export EPISODES_SUCCEEDED="14"
@@ -197,18 +213,24 @@ lerobot-wandb rollout upload \
   --episodes-succeeded "$EPISODES_SUCCEEDED"
 ```
 
-Use the immutable `MODEL_REF`, not `candidate`. Resolving the alias again at upload time could attach
-the rollout to a different policy than the robot used.
+Use the immutable `MODEL_REF`, not `candidate`. The ref is resolved again at upload time, so an alias
+that moved in between could record a policy the robot never used. Recording the wrong model is worse
+than recording nothing because the lineage looks authoritative.
 
-The upload Run records the policy as an input lineage edge without downloading it and publishes the
-rollout as a distinct `rollout` Artifact. It logs episode count, success count and rate, frame count,
-duration, requested and resolved policy references, and one deterministic representative video.
-The complete rollout remains in the Artifact.
+The upload Run declares the model as an **input** — resolved for lineage and never downloaded — and
+the rollout as an **output** of type `rollout`, distinct from a training dataset. It logs episode
+count, success count and rate, frame count, duration, requested and resolved model refs, and one
+deterministically selected representative video. The complete rollout remains in the Artifact.
+
+> **About the representative video:** in Dataset v3, a single `.mp4` may contain as many episodes as
+> fit under the writer's file-size target, so the UI clip can represent an episode span. The Run
+> summary records the included episodes under `representative_video_episodes`.
 
 ## 7. Promote what worked
 
-Promote the exact version evaluated by the rollout. Do not re-upload the downloaded directory,
-because that would create a new version with no lineage edge to the evaluation.
+Nothing is promoted automatically. Promote the exact immutable version evaluated by the rollout.
+Do not re-upload the downloaded directory: `model upload` would create a new version with no lineage
+edge to the evaluation, while the rollout remains attached to the version actually tested.
 
 ```bash
 lerobot-wandb model promote \
@@ -217,9 +239,22 @@ lerobot-wandb model promote \
   --registry-collection pick-cube-policy
 ```
 
-`model promote` moves aliases and Registry links without uploading model bytes. Non-model Artifacts,
-periodic weight-only checkpoints, and adapter-only policies are refused as deployable Registry
-entries.
+`model promote` updates the existing version without uploading model bytes. The project alias and
+Registry link point to the evaluated version, and the printed digest lets you confirm that the bytes
+did not change.
+
+A ref that is not a `model` Artifact is rejected. A version that cannot load as a standalone policy
+is refused a deployable Registry link — for example, a periodic weight-only checkpoint without
+`config.json`, or an adapter-only checkpoint whose base model is not bundled. The check uses the
+immutable file manifest and requires no download. Omitting `registry-collection` still permits a
+project alias for such a version.
+
+The Registry link is attempted before the project alias moves. There is no transaction across the
+two server-side writes; this ordering ensures that a failed Registry link leaves the production
+alias unchanged rather than pointing it at a version that never reached the Registry.
+
+Whether a rollout justifies promotion remains an operator decision made from the Run. This workflow
+does not compute it.
 
 ## Where things live afterwards
 
