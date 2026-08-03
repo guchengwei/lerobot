@@ -64,7 +64,7 @@ export WANDB_PROJECT="so101-pick-cube"
 
 ## 1. Teaching dataset を記録する
 
-通常の LeRobot recording です。この時点では W&B は使用しません。
+通常の LeRobot teleoperation recording です。この時点では W&B は使用しません。
 
 ```bash
 lerobot-record \
@@ -222,13 +222,13 @@ entry として拒否されます。
 
 ## 保存先と lineage
 
-| 対象 | 保存先 |
-| --- | --- |
-| Teaching dataset | `dataset` Artifact の `pick-cube` |
-| Trained policy | `model` Artifact の `pick-cube-policy` と Registry link |
-| Rollout episodes | `rollout` Artifact の `pick-cube-rollout` |
-| Dataset から policy への lineage | training Run config と model Artifact metadata |
-| Policy から rollout への lineage | rollout Run input edge と rollout Artifact metadata |
+| 対象                             | 保存先                                                  |
+| -------------------------------- | ------------------------------------------------------- |
+| Teaching dataset                 | `dataset` Artifact の `pick-cube`                       |
+| Trained policy                   | `model` Artifact の `pick-cube-policy` と Registry link |
+| Rollout episodes                 | `rollout` Artifact の `pick-cube-rollout`               |
+| Dataset から policy への lineage | training Run config と model Artifact metadata          |
+| Policy から rollout への lineage | rollout Run input edge と rollout Artifact metadata     |
 
 この workflow の目的は単なる file storage ではなく、dataset、training、physical rollout、promotion を
 immutable version と lineage で接続し、後から判断根拠を再現できる状態にすることです。
