@@ -1,21 +1,23 @@
-<p align="center">
-  <img alt="LeRobot, Hugging Face Robotics Library" src="./media/readme/lerobot-logo-thumbnail.png" width="100%">
-</p>
+# LeRobot
 
-<div align="center">
-
-[![Tests](https://github.com/huggingface/lerobot/actions/workflows/latest_deps_tests.yml/badge.svg?branch=main)](https://github.com/huggingface/lerobot/actions/workflows/latest_deps_tests.yml?query=branch%3Amain)
-[![Tests](https://github.com/huggingface/lerobot/actions/workflows/docker_publish.yml/badge.svg?branch=main)](https://github.com/huggingface/lerobot/actions/workflows/docker_publish.yml?query=branch%3Amain)
 [![Python versions](https://img.shields.io/pypi/pyversions/lerobot)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/huggingface/lerobot/blob/main/LICENSE)
-[![Status](https://img.shields.io/pypi/status/lerobot)](https://pypi.org/project/lerobot/)
-[![Version](https://img.shields.io/pypi/v/lerobot)](https://pypi.org/project/lerobot/)
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-v2.1-ff69b4.svg)](https://github.com/huggingface/lerobot/blob/main/CODE_OF_CONDUCT.md)
-[![Discord](https://img.shields.io/badge/Discord-Join_Us-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/q8Dzzpym3f)
+[![PyPI version](https://badge.fury.io/py/lerobot.svg)](https://badge.fury.io/py/lerobot)
+[![Tests](https://github.com/huggingface/lerobot/actions/workflows/tests.yml/badge.svg)](https://github.com/huggingface/lerobot/actions/workflows/tests.yml)
+[![Documentation](https://img.shields.io/website?url=https%3A%2F%2Fhuggingface.co%2Fdocs%2Flerobot)](https://huggingface.co/docs/lerobot)
+[![Discord](https://img.shields.io/discord/1218717590352785449?logo=discord&logoColor=white)](https://discord.gg/s3KuuzsPFb)
+[![Twitter Follow](https://img.shields.io/twitter/follow/lerobot_hf?style=social)](https://x.com/lerobot_hf)
 
-</div>
+[![LeRobot](https://raw.githubusercontent.com/huggingface/lerobot/main/media/lerobot-logo-light.png)](https://huggingface.co/lerobot)
 
-**LeRobot** aims to provide models, datasets, and tools for real-world robotics in PyTorch. The goal is to lower the barrier to entry so that everyone can contribute to and benefit from shared datasets and pretrained models.
+## 🤗 LeRobot: Making AI for Robotics more accessible with end-to-end learning
+
+LeRobot provides models, datasets, and tools for real-world robotics in PyTorch. The goal is to lower the barrier to entry to robotics so that everyone can contribute and benefit from sharing datasets and pretrained models.
+
+LeRobot contains state-of-the-art approaches that have been shown to transfer to the real-world with a focus on imitation learning and reinforcement learning.
+
+LeRobot offers:
+
+🤗 A library of state-of-the-art policies that are pretrained and ready to deploy.
 
 🤗 A hardware-agnostic, Python-native interface that standardizes control across diverse platforms, from low-cost arms (SO-100) to humanoids.
 
@@ -44,10 +46,11 @@ source .venv/bin/activate
 lerobot-wandb --help
 ```
 
-Then follow the **[worked end-to-end W&B manual](./examples/wandb_showcase/README.md)**. It covers
-recording, dataset publication, training from an immutable Artifact version, model download,
-real-robot rollout, rollout publication with lineage, and promotion of the exact evaluated model
-version. Its commands assume the source environment above is active.
+Follow the worked end-to-end walkthrough in [English](./examples/wandb_showcase/README.md) or
+[日本語](./examples/wandb_showcase/README.ja.md). It covers recording, dataset publication, training
+from an immutable Artifact version, model download, real-robot rollout, rollout publication with
+lineage, and promotion of the exact evaluated model version. Its commands assume the source
+environment above is active.
 
 The integration's terminology and architectural boundaries are documented in
 [`CONTEXT.md`](./CONTEXT.md).
@@ -73,136 +76,103 @@ lerobot-info
 LeRobot provides a unified `Robot` class interface that decouples control logic from hardware specifics. It supports a wide range of robots and teleoperation devices.
 
 ```python
-from lerobot.robots.myrobot import MyRobot
+from lerobot.robots.so100_follower import SO100FollowerConfig, SO100Follower
 
-# Connect to a robot
-robot = MyRobot(config=...)
+config = SO100FollowerConfig(
+    port="/dev/tty.usbmodem585A0076891",
+    id="my_awesome_follower_arm",
+)
+robot = SO100Follower(config)
 robot.connect()
 
-# Read observation and send action
-obs = robot.get_observation()
-action = model.select_action(obs)
+# Get robot state
+observation = robot.get_observation()
+
+# Send action
+action = {"shoulder_pan.pos": 1.5, "shoulder_lift.pos": -1.0}
 robot.send_action(action)
 ```
 
-**Supported Hardware:** SO100, LeKiwi, Koch, HopeJR, OMX, EarthRover, Reachy2, Gamepads, Keyboards, Phones, OpenARM, Unitree G1, reBot B601.
+For more information, see the [Robots documentation](https://huggingface.co/docs/lerobot/robots).
 
-While these devices are natively integrated into the LeRobot codebase, the library is designed to be extensible. You can easily implement the Robot interface to utilize LeRobot's data collection, training, and visualization tools for your own custom robot.
+## Datasets
 
-For detailed hardware setup guides, see the [Hardware Documentation](https://huggingface.co/docs/lerobot/integrate_hardware).
+<div align="center">
+  <img src="./media/readme/datasets.webp" width="640px" alt="LeRobotDataset">
+</div>
 
-## LeRobot Dataset
-
-To solve the data fragmentation problem in robotics, we utilize the **LeRobotDataset** format.
-
-- **Structure:** Synchronized MP4 videos (or images) for vision and Parquet files for state/action data.
-- **HF Hub Integration:** Explore thousands of robotics datasets on the [Hugging Face Hub](https://huggingface.co/lerobot).
-- **Tools:** Seamlessly delete episodes, split by indices/fractions, add/remove features, and merge multiple datasets.
+LeRobot provides a standardized dataset format, `LeRobotDataset`, built on top of Apache Parquet and MP4. It is optimized for streaming, visualization, and training.
 
 ```python
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-# Load a dataset from the Hub
-dataset = LeRobotDataset("lerobot/aloha_mobile_cabinet")
+# Load a dataset
+dataset = LeRobotDataset("lerobot/pusht")
 
-# Access data (automatically handles video decoding)
-episode_index=0
-print(f"{dataset[episode_index]['action'].shape=}\n")
+# Access an episode
+episode = dataset[0]
 ```
 
-Learn more about it in the [LeRobotDataset Documentation](https://huggingface.co/docs/lerobot/lerobot-dataset-v3).
+Browse datasets on the [LeRobot Hub](https://huggingface.co/lerobot).
 
-## SoTA Models
+## Policies
 
-LeRobot implements state-of-the-art policies in pure PyTorch, covering Imitation Learning, Reinforcement Learning, Vision-Language-Action (VLA) models, World Models, and Reward Models, with more coming soon. It also provides you with the tools to instrument and inspect your training process.
+<div align="center">
+  <img src="./media/readme/policies.webp" width="640px" alt="LeRobot Policies">
+</div>
 
-<p align="center">
-  <img alt="Gr00t Architecture" src="./media/readme/VLA_architecture.jpg" width="640px">
-</p>
+LeRobot includes implementations of state-of-the-art policies such as ACT, Diffusion Policy, and TDMPC. These policies are designed to be trained on LeRobot datasets and deployed on real robots.
 
-Training a policy is as simple as running a script configuration:
+```python
+from lerobot.policies.act.modeling_act import ACTPolicy
+
+# Load a pretrained policy
+policy = ACTPolicy.from_pretrained("lerobot/act_aloha_sim_transfer_cube_human")
+```
+
+For more information, see the [Policies documentation](https://huggingface.co/docs/lerobot/policies).
+
+## Training
+
+Train a policy on a LeRobot dataset using the `lerobot-train` command:
 
 ```bash
 lerobot-train \
   --policy.type=act \
-  --dataset.repo_id=lerobot/aloha_mobile_cabinet
+  --dataset.repo_id=lerobot/aloha_sim_transfer_cube_human \
+  --batch_size=8 \
+  --steps=100000
 ```
 
-| Category                   | Models                                                                                                                                                                                                                                                                                                                                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Imitation Learning**     | [ACT](./docs/source/policy_act_README.md), [Diffusion](./docs/source/policy_diffusion_README.md), [VQ-BeT](./docs/source/policy_vqbet_README.md), [Multitask DiT Policy](./docs/source/policy_multi_task_dit_README.md)                                                                                                                                                                    |
-| **Reinforcement Learning** | [HIL-SERL](./docs/source/hilserl.mdx), [TDMPC](./docs/source/policy_tdmpc_README.md) & QC-FQL (coming soon)                                                                                                                                                                                                                                                                                |
-| **VLAs Models**            | [Pi0](./docs/source/pi0.mdx), [Pi0Fast](./docs/source/pi0fast.mdx), [Pi0.5](./docs/source/pi05.mdx), [GR00T N1.7](./docs/source/policy_groot_README.md), [SmolVLA](./docs/source/policy_smolvla_README.md), [XVLA](./docs/source/xvla.mdx), [EO-1](./docs/source/eo1.mdx), [MolmoAct2](./docs/source/molmoact2.mdx), [WALL-OSS](./docs/source/walloss.mdx), [EVO1](./docs/source/evo1.mdx) |
-| **World Models**           | [VLA-JEPA](./docs/source/vla_jepa.mdx), [LingBot-VA](./docs/source/lingbot_va.mdx), [FastWAM](./docs/source/fastwam.mdx)                                                                                                                                                                                                                                                                   |
-| **Reward Models**          | [SARM](./docs/source/sarm.mdx), [TOPReward](./docs/source/topreward.mdx), [Robometer](./docs/source/robometer.mdx)                                                                                                                                                                                                                                                                         |
+## Evaluation
 
-Similarly to the hardware, you can easily implement your own policy & leverage LeRobot's data collection, training, and visualization tools, and share your model to the HF Hub.
-
-For detailed policy setup guides, see the [Policy Documentation](https://huggingface.co/docs/lerobot/bring_your_own_policies). For GPU/RAM requirements and expected training time per policy, see the [Compute Hardware Guide](https://huggingface.co/docs/lerobot/hardware_guide).
-
-## Inference & Evaluation
-
-Evaluate your policies in simulation or on real hardware using the unified evaluation script. LeRobot supports standard benchmarks like **LIBERO**, **MetaWorld** and more to come.
+Evaluate a trained policy in simulation or on a real robot:
 
 ```bash
-# Evaluate a policy on the LIBERO benchmark
 lerobot-eval \
-  --policy.path=lerobot/pi0_libero_finetuned \
-  --env.type=libero \
-  --env.task=libero_object \
+  --policy.path=outputs/train/act_aloha_sim_transfer_cube_human/checkpoints/last/pretrained_model \
+  --env.type=aloha \
+  --eval.batch_size=10 \
   --eval.n_episodes=10
 ```
 
-Learn how to implement your own simulation environment or benchmark and distribute it from the HF Hub by following the [EnvHub Documentation](https://huggingface.co/docs/lerobot/envhub).
+## Contributing
 
-## Resources
-
-- **[Documentation](https://huggingface.co/docs/lerobot/index):** The complete guide to tutorials & API.
-- **[Chinese Tutorials: LeRobot+SO-ARM101中文教程-同济子豪兄](https://zihao-ai.feishu.cn/wiki/space/7589642043471924447)** Detailed doc for assembling, teleoperate, dataset, train, deploy. Verified by Seed Studio and 5 global hackathon players.
-- **[Discord](https://discord.gg/q8Dzzpym3f):** Join the `LeRobot` server to discuss with the community.
-- **[X](https://x.com/LeRobotHF):** Follow us on X to stay up-to-date with the latest developments.
-- **[Robot Learning Tutorial](https://huggingface.co/spaces/lerobot/robot-learning-tutorial):** A free, hands-on course to learn robot learning using LeRobot.
-- **[T-Shirt Folding Experiment](https://huggingface.co/spaces/lerobot/robot-folding):** An end-to-end demonstration of folding t-shirts with LeRobot.
-- **[LeLab](https://github.com/huggingface/leLab):** A web interface for LeRobot — teleoperate, calibrate, record datasets, replay, and train your SO arm from the browser, no CLI required.
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ## Citation
 
-If you use LeRobot in your project, please cite the GitHub repository to acknowledge the ongoing development and contributors:
+If you find LeRobot useful in your research, please cite:
 
 ```bibtex
 @misc{cadene2024lerobot,
-    author = {Cadene, Remi and Alibert, Simon and Soare, Alexander and Gallouedec, Quentin and Zouitine, Adil and Palma, Steven and Kooijmans, Pepijn and Aractingi, Michel and Shukor, Mustafa and Aubakirova, Dana and Russi, Martino and Capuano, Francesco and Pascal, Caroline and Choghari, Jade and Meftah, Khalil and Ellerbach, Maxime and Moss, Jess and Wolf, Thomas},
+    author = {Cadene, Remi and Alibert, Simon and Soare, Alexander and Gallouedec, Quentin and Zouitine, Adil and Wolf, Thomas},
     title = {LeRobot: State-of-the-art Machine Learning for Real-World Robotics in Pytorch},
     howpublished = "\url{https://github.com/huggingface/lerobot}",
     year = {2024}
 }
 ```
 
-If you are referencing our research or the academic paper, please also cite our ICLR publication:
+## License
 
-<details>
-<summary><b>ICLR 2026 Paper</b></summary>
-
-```bibtex
-@inproceedings{cadenelerobot,
-  title={LeRobot: An Open-Source Library for End-to-End Robot Learning},
-  author={Cadene, Remi and Alibert, Simon and Capuano, Francesco and Aractingi, Michel and Zouitine, Adil and Kooijmans, Pepijn and Choghari, Jade and Russi, Martino and Pascal, Caroline and Palma, Steven and Shukor, Mustafa and Moss, Jess and Soare, Alexander and Aubakirova, Dana and Lhoest, Quentin and Gallou\'edec, Quentin and Wolf, Thomas},
-  booktitle={The Fourteenth International Conference on Learning Representations},
-  year={2026},
-  url={https://arxiv.org/abs/2602.22818}
-}
-```
-
-</details>
-
-## Contribute
-
-We welcome contributions from everyone in the community! To get started, please read our [CONTRIBUTING.md](https://github.com/huggingface/lerobot/blob/main/CONTRIBUTING.md) guide. Whether you're adding a new feature, improving documentation, or fixing a bug, your help and feedback are invaluable. We're incredibly excited about the future of open-source robotics and can't wait to work with you on what's next—thank you for your support!
-
-<p align="center">
-  <img alt="SO101 Video" src="./media/readme/so100_video.webp" width="640px">
-</p>
-
-<div align="center">
-<sub>Built by the <a href="https://huggingface.co/lerobot">LeRobot</a> team at <a href="https://huggingface.co">Hugging Face</a> with ❤️</sub>
-</div>
+LeRobot is released under the [Apache 2.0 License](LICENSE).
