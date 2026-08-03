@@ -223,10 +223,10 @@ entries.
 
 ## Where things live afterwards
 
-| Thing | Where |
-| --- | --- |
-| Teaching dataset | `dataset` Artifact, `pick-cube` |
-| Trained policy | `model` Artifact, `pick-cube-policy` plus Registry link |
-| Rollout episodes | `rollout` Artifact, `pick-cube-rollout` |
-| Dataset-to-policy lineage | training Run config and model Artifact metadata |
-| Policy-to-rollout lineage | rollout Run input edge and rollout Artifact metadata |
+| Thing                     | Where                                                   |
+| ------------------------- | ------------------------------------------------------- |
+| Teaching dataset          | `dataset` Artifact, `pick-cube`                         |
+| Trained policy            | `model` Artifact, `pick-cube-policy` plus Registry link |
+| Rollout episodes          | `rollout` Artifact, `pick-cube-rollout`                 |
+| Dataset-to-policy lineage | training Run config and model Artifact metadata         |
+| Policy-to-rollout lineage | rollout Run input edge and rollout Artifact metadata    |
