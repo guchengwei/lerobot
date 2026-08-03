@@ -100,7 +100,7 @@ def test_showcase_declares_and_reuses_operator_values():
 
     assert env["WANDB_ENTITY"] == "your-wandb-entity"
     assert env["WANDB_PROJECT"] == "so101-pick-cube"
-    assert re.fullmatch(r"v\d+", env["MODEL_VERSION"])
+    assert re.fullmatch(r"[^/]+/[^/]+/pick-cube-policy:v\d+", env["MODEL_REF"])
     assert env["EPISODES_SUCCEEDED"].isdigit()
     assert "source .venv/bin/activate" in text
     assert "my-team" not in text
@@ -109,8 +109,13 @@ def test_showcase_declares_and_reuses_operator_values():
     assert '--entity "$WANDB_ENTITY"' in commands
     assert '--project "$WANDB_PROJECT"' in commands
     assert "$WANDB_ENTITY/$WANDB_PROJECT" in commands
-    assert ':$MODEL_VERSION"' in commands
+    assert '--model-ref "$MODEL_REF"' in commands
+    assert '--ref "$MODEL_REF"' in commands
     assert '--episodes-succeeded "$EPISODES_SUCCEEDED"' in commands
+
+    assert text.index('export WANDB_ENTITY="') < text.index("lerobot-wandb dataset upload")
+    assert text.index('export MODEL_REF="') < text.index("lerobot-rollout")
+    assert text.index('export EPISODES_SUCCEEDED="') < text.index("lerobot-wandb rollout upload")
 
 
 @pytest.mark.parametrize("command", _readme_commands(), ids=lambda c: " ".join(c.split()[:3]))
@@ -186,16 +191,18 @@ def test_readme_record_command_parses():
 
 
 def test_readme_records_the_immutable_model_version_for_the_rollout():
-    """The rollout upload must name the version the robot actually ran, not the alias it was
-    downloaded through: `cmd_rollout_upload` resolves the ref again at upload time, so an alias that
+    """The rollout upload must name the full version the robot actually ran, not an alias or a
+    reconstructed ref: `cmd_rollout_upload` resolves the ref again at upload time, so an alias that
     moved in between would record a model the rollout never used — wrong, and authoritative-looking.
     """
     raw_upload = next(c for c in _raw_readme_commands() if c.startswith("lerobot-wandb rollout upload"))
-    assert ":$MODEL_VERSION" in raw_upload
+    assert '--model-ref "$MODEL_REF"' in raw_upload
 
     upload = _expand_documented_values(raw_upload)
     model_ref = upload.split("--model-ref ", 1)[1].split()[0].strip('"')
-    assert re.fullmatch(r"[^:]+:v\d+", model_ref), f"--model-ref must pin a version, got {model_ref!r}"
+    assert re.fullmatch(r"[^/]+/[^/]+/[^:]+:v\d+", model_ref), (
+        f"--model-ref must pin a full immutable version, got {model_ref!r}"
+    )
 
 
 def test_readme_rollout_command_uses_a_rollout_prefixed_dataset_name():
