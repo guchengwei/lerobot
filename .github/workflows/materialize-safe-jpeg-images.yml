@@ -1,0 +1,100 @@
+name: Materialize safe JPEG images
+
+on:
+  push:
+    branches:
+      - automation/materialize-safe-jpeg-images
+    paths:
+      - .tmp/jpeg/READY
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Materialize supplied workflow images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          assets=examples/wandb_showcase/assets
+          mkdir -p "$assets"
+          cat .tmp/jpeg/en/*.txt | tr -d '\n' | base64 --decode > "$assets/wandb-workflow-overview-en.jpg"
+          cat .tmp/jpeg/ja/*.txt | tr -d '\n' | base64 --decode > "$assets/wandb-workflow-overview-ja.jpg"
+
+          python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+
+          root = Path('.')
+          assets = root / 'examples' / 'wandb_showcase' / 'assets'
+          expected = {
+              assets / 'wandb-workflow-overview-en.jpg': (
+                  144_865,
+                  'd399bd053c23cde8a6184cee9da59a3bd9e2f4264b30736d7f40047d43691387',
+              ),
+              assets / 'wandb-workflow-overview-ja.jpg': (
+                  170_993,
+                  '4c7686db59b46b0d0cbb3770da68ed4f64378885b554ec2fb5ef199a40ba1933',
+              ),
+          }
+          for path, (size, digest) in expected.items():
+              data = path.read_bytes()
+              assert len(data) == size, (path, len(data))
+              assert sha256(data).hexdigest() == digest, path
+              assert data.startswith(b'\xff\xd8') and data.endswith(b'\xff\xd9'), path
+
+          replacements = {
+              root / 'examples' / 'wandb_showcase' / 'README.md': (
+                  './assets/wandb-workflow-overview-en.svg',
+                  './assets/wandb-workflow-overview-en.jpg',
+              ),
+              root / 'examples' / 'wandb_showcase' / 'README.ja.md': (
+                  './assets/wandb-workflow-overview-ja.svg',
+                  './assets/wandb-workflow-overview-ja.jpg',
+              ),
+          }
+          for path, (old, new) in replacements.items():
+              text = path.read_text()
+              assert old in text and new not in text, path
+              path.write_text(text.replace(old, new, 1))
+
+          test_path = root / 'tests' / 'integrations' / 'wandb_artifacts' / 'test_showcase_localization.py'
+          text = test_path.read_text()
+          text = text.replace('wandb-workflow-overview-en.svg', 'wandb-workflow-overview-en.jpg')
+          text = text.replace('wandb-workflow-overview-ja.svg', 'wandb-workflow-overview-ja.jpg')
+          old = '''    for diagram in (ENGLISH_DIAGRAM, JAPANESE_DIAGRAM):
+        text = diagram.read_text()
+        assert text.startswith("<svg")
+        assert "Conceptual overview" in text or "概念図" in text
+        assert diagram.stat().st_size > 5_000
+'''
+          new = '''    for diagram in (ENGLISH_DIAGRAM, JAPANESE_DIAGRAM):
+        data = diagram.read_bytes()
+        assert data.startswith(b"\\xff\\xd8")
+        assert data.endswith(b"\\xff\\xd9")
+        assert 100_000 < diagram.stat().st_size < 1024 * 1024
+
+    for suffix in (".svg", ".webp"):
+        assert not (SHOWCASE / "assets" / f"wandb-workflow-overview-en{suffix}").exists()
+        assert not (SHOWCASE / "assets" / f"wandb-workflow-overview-ja{suffix}").exists()
+'''
+          assert old in text
+          test_path.write_text(text.replace(old, new, 1))
+          PY
+
+          rm -f "$assets/wandb-workflow-overview-en.svg" "$assets/wandb-workflow-overview-ja.svg"
+          rm -rf .tmp/jpeg
+          rm -f .github/workflows/materialize-safe-jpeg-images.yml
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "docs: use high-quality JPEG workflow images"
+          git push origin HEAD:automation/materialize-safe-jpeg-images
