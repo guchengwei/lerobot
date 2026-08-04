@@ -1,0 +1,179 @@
+name: Import supplied W&B diagrams
+
+on:
+  push:
+    branches:
+      - agent/use-supplied-wandb-diagrams
+
+permissions:
+  contents: write
+
+jobs:
+  import-diagrams:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/use-supplied-wandb-diagrams
+
+      - name: Import the supplied images and update references
+        env:
+          ENGLISH_IMAGE_URL: https://github.com/user-attachments/assets/97eb417f-cd69-41db-ba78-7ad2503381b0
+          JAPANESE_IMAGE_URL: https://github.com/user-attachments/assets/30906c5b-d7eb-400c-ab07-e2773fa1c7e5
+        run: |
+          set -euo pipefail
+
+          assets_dir="examples/wandb_showcase/assets"
+          english_image="$assets_dir/wandb-workflow-overview-en.png"
+          japanese_image="$assets_dir/wandb-workflow-overview-ja.png"
+
+          curl --fail --location --retry 3 --retry-all-errors \
+            "$ENGLISH_IMAGE_URL" --output "$english_image"
+          curl --fail --location --retry 3 --retry-all-errors \
+            "$JAPANESE_IMAGE_URL" --output "$japanese_image"
+
+          python - <<'PY'
+          import struct
+          from pathlib import Path
+
+          expected = {
+              Path("examples/wandb_showcase/assets/wandb-workflow-overview-en.png"): (1536, 1024),
+              Path("examples/wandb_showcase/assets/wandb-workflow-overview-ja.png"): (1448, 1086),
+          }
+
+          for path, dimensions in expected.items():
+              data = path.read_bytes()
+              if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+                  raise SystemExit(f"{path} is not a PNG")
+              actual = struct.unpack(">II", data[16:24])
+              if actual != dimensions:
+                  raise SystemExit(f"{path} has dimensions {actual}, expected {dimensions}")
+
+          replacements = {
+              Path("examples/wandb_showcase/README.md"): (
+                  "assets/wandb-workflow-overview-en.svg",
+                  "assets/wandb-workflow-overview-en.png",
+              ),
+              Path("examples/wandb_showcase/README.ja.md"): (
+                  "assets/wandb-workflow-overview-ja.svg",
+                  "assets/wandb-workflow-overview-ja.png",
+              ),
+          }
+
+          for path, (old, new) in replacements.items():
+              content = path.read_text(encoding="utf-8")
+              if content.count(old) != 1:
+                  raise SystemExit(f"expected exactly one {old!r} reference in {path}")
+              path.write_text(content.replace(old, new), encoding="utf-8")
+          PY
+
+          cat > tests/integrations/wandb_artifacts/test_showcase_localization.py <<'PY'
+          #!/usr/bin/env python
+
+          import struct
+          from pathlib import Path
+
+          import yaml
+
+
+          SHOWCASE_DIR = Path(__file__).parents[3] / "examples" / "wandb_showcase"
+          ENGLISH_README_PATH = SHOWCASE_DIR / "README.md"
+          JAPANESE_README_PATH = SHOWCASE_DIR / "README.ja.md"
+          ENGLISH_DIAGRAM_PATH = SHOWCASE_DIR / "assets" / "wandb-workflow-overview-en.png"
+          JAPANESE_DIAGRAM_PATH = SHOWCASE_DIR / "assets" / "wandb-workflow-overview-ja.png"
+
+          TECHNICAL_TERMS = (
+              "Artifact",
+              "Run",
+              "Registry",
+              "alias",
+              "lineage",
+              "rollout",
+              "teleoperation",
+              "checkpoint",
+              "policy",
+              "remote store",
+              "runtime cache",
+              "control loop",
+          )
+
+
+          def _read(path: Path) -> str:
+              return path.read_text(encoding="utf-8")
+
+
+          def _png_dimensions(path: Path) -> tuple[int, int]:
+              data = path.read_bytes()
+              assert data[:8] == b"\x89PNG\r\n\x1a\n"
+              assert data[12:16] == b"IHDR"
+              return struct.unpack(">II", data[16:24])
+
+
+          def _shell_blocks(markdown: str) -> list[str]:
+              return [part.split("```", 1)[0].strip() for part in markdown.split("```bash\n")[1:]]
+
+
+          def _commands(markdown: str) -> list[str]:
+              return [block for block in _shell_blocks(markdown) if block.startswith(("uv ", "wandb ", "lerobot-"))]
+
+
+          def test_manuals_link_to_each_other_and_use_supplied_diagrams():
+              english = _read(ENGLISH_README_PATH)
+              japanese = _read(JAPANESE_README_PATH)
+
+              assert "[日本語版](README.ja.md)" in english
+              assert "[English](README.md)" in japanese
+              assert "(assets/wandb-workflow-overview-en.png)" in english
+              assert "(assets/wandb-workflow-overview-ja.png)" in japanese
+              assert _png_dimensions(ENGLISH_DIAGRAM_PATH) == (1536, 1024)
+              assert _png_dimensions(JAPANESE_DIAGRAM_PATH) == (1448, 1086)
+
+
+          def test_japanese_manual_keeps_cli_commands_and_technical_terms():
+              english = _read(ENGLISH_README_PATH)
+              japanese = _read(JAPANESE_README_PATH)
+
+              assert _commands(japanese) == _commands(english)
+              assert all(term in japanese for term in TECHNICAL_TERMS)
+              assert any("\u3040" <= character <= "\u30ff" for character in japanese)
+              assert "your-team" not in japanese
+              assert "my-team" not in japanese
+
+              rollout_upload = _commands(japanese)[-2]
+              checkpoint_upload = _commands(japanese)[-3]
+              promote = _commands(japanese)[-1]
+
+              assert '--model-ref "$MODEL_REF"' in rollout_upload
+              assert '--ref "$MODEL_REF"' in checkpoint_upload
+              assert '--ref "$MODEL_REF"' in promote
+
+
+          def test_japanese_yaml_fragments_match_english():
+              english = _read(ENGLISH_README_PATH)
+              japanese = _read(JAPANESE_README_PATH)
+
+              english_yaml = [yaml.safe_load(part.split("```", 1)[0]) for part in english.split("```yaml\n")[1:]]
+              japanese_yaml = [yaml.safe_load(part.split("```", 1)[0]) for part in japanese.split("```yaml\n")[1:]]
+
+              assert japanese_yaml == english_yaml
+          PY
+
+          rm "$assets_dir/wandb-workflow-overview-en.svg"
+          rm "$assets_dir/wandb-workflow-overview-ja.svg"
+          rm .github/workflows/import-supplied-wandb-diagrams.yml
+
+      - name: Commit imported assets
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            examples/wandb_showcase/README.md \
+            examples/wandb_showcase/README.ja.md \
+            examples/wandb_showcase/assets \
+            tests/integrations/wandb_artifacts/test_showcase_localization.py \
+            .github/workflows/import-supplied-wandb-diagrams.yml
+          git commit -m "docs: use supplied W&B workflow diagrams"
+          git push origin HEAD:agent/use-supplied-wandb-diagrams
