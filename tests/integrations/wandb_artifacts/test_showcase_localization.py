@@ -20,8 +20,8 @@ REPO_ROOT = Path(__file__).parents[3]
 SHOWCASE = REPO_ROOT / "examples" / "wandb_showcase"
 ENGLISH = SHOWCASE / "README.md"
 JAPANESE = SHOWCASE / "README.ja.md"
-ENGLISH_DIAGRAM = SHOWCASE / "assets" / "wandb-workflow-overview-en.svg"
-JAPANESE_DIAGRAM = SHOWCASE / "assets" / "wandb-workflow-overview-ja.svg"
+ENGLISH_DIAGRAM = "https://github.com/user-attachments/assets/97eb417f-cd69-41db-ba78-7ad2503381b0"
+JAPANESE_DIAGRAM = "https://github.com/user-attachments/assets/30906c5b-d7eb-400c-ab07-e2773fa1c7e5"
 _BASH_BLOCK = re.compile(r"```bash\n(.*?)```", re.S)
 
 
@@ -29,20 +29,15 @@ def _bash_blocks(path: Path) -> list[str]:
     return [block.strip() for block in _BASH_BLOCK.findall(path.read_text())]
 
 
-def test_manuals_link_to_each_other_and_render_local_diagrams() -> None:
+def test_manuals_link_to_each_other_and_render_supplied_diagrams() -> None:
     english = ENGLISH.read_text()
     japanese = JAPANESE.read_text()
 
     assert "README.ja.md" in english
     assert "README.md" in japanese
-    assert "./assets/wandb-workflow-overview-en.svg" in english
-    assert "./assets/wandb-workflow-overview-ja.svg" in japanese
-
-    for diagram in (ENGLISH_DIAGRAM, JAPANESE_DIAGRAM):
-        text = diagram.read_text()
-        assert text.startswith("<svg")
-        assert "Conceptual overview" in text or "概念図" in text
-        assert diagram.stat().st_size > 5_000
+    assert f"]({ENGLISH_DIAGRAM})" in english
+    assert f"]({JAPANESE_DIAGRAM})" in japanese
+    assert ENGLISH_DIAGRAM != JAPANESE_DIAGRAM
 
 
 def test_localized_manual_uses_the_same_commands_as_english() -> None:
