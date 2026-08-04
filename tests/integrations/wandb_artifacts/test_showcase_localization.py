@@ -5,7 +5,6 @@ from pathlib import Path
 
 import yaml
 
-
 SHOWCASE_DIR = Path(__file__).parents[3] / "examples" / "wandb_showcase"
 ENGLISH_README_PATH = SHOWCASE_DIR / "README.md"
 JAPANESE_README_PATH = SHOWCASE_DIR / "README.ja.md"
