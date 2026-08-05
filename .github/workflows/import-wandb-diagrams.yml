@@ -1,0 +1,104 @@
+name: Import supplied W&B diagrams
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - docs/use-supplied-wandb-diagrams
+
+jobs:
+  import-diagrams:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: true
+
+      - name: Import the supplied diagrams
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          assets=examples/wandb_showcase/assets
+          curl --fail --location --retry 3 \
+            https://github.com/user-attachments/assets/97eb417f-cd69-41db-ba78-7ad2503381b0 \
+            --output "$assets/wandb-workflow-overview-en.png"
+          curl --fail --location --retry 3 \
+            https://github.com/user-attachments/assets/30906c5b-d7eb-400c-ab07-e2773fa1c7e5 \
+            --output "$assets/wandb-workflow-overview-ja.png"
+
+          python - <<'PY'
+          import struct
+          from pathlib import Path
+
+          showcase = Path("examples/wandb_showcase")
+          diagrams = {
+              showcase / "assets" / "wandb-workflow-overview-en.png": (1536, 1024),
+              showcase / "assets" / "wandb-workflow-overview-ja.png": (1448, 1086),
+          }
+          for diagram, expected_dimensions in diagrams.items():
+              data = diagram.read_bytes()
+              assert data.startswith(b"\x89PNG\r\n\x1a\n"), diagram
+              assert data[12:16] == b"IHDR", diagram
+              assert struct.unpack(">II", data[16:24]) == expected_dimensions, diagram
+              assert diagram.stat().st_size <= 1024 * 1024, diagram
+
+          replacements = {
+              showcase / "README.md": (
+                  "./assets/wandb-workflow-overview-en.svg",
+                  "./assets/wandb-workflow-overview-en.png",
+              ),
+              showcase / "README.ja.md": (
+                  "./assets/wandb-workflow-overview-ja.svg",
+                  "./assets/wandb-workflow-overview-ja.png",
+              ),
+          }
+          for path, (old, new) in replacements.items():
+              text = path.read_text()
+              assert old in text, path
+              path.write_text(text.replace(old, new))
+
+          test_path = Path("tests/integrations/wandb_artifacts/test_showcase_localization.py")
+          test = test_path.read_text()
+          test = test.replace(
+              "import re\nfrom pathlib import Path\n",
+              "import re\nimport struct\nfrom pathlib import Path\n",
+          )
+          test = test.replace("wandb-workflow-overview-en.svg", "wandb-workflow-overview-en.png")
+          test = test.replace("wandb-workflow-overview-ja.svg", "wandb-workflow-overview-ja.png")
+          old = '''    for diagram in (ENGLISH_DIAGRAM, JAPANESE_DIAGRAM):
+              text = diagram.read_text()
+              assert text.startswith("<svg")
+              assert "Conceptual overview" in text or "概念図" in text
+              assert diagram.stat().st_size > 5_000
+          '''
+          new = '''    expected_dimensions = {
+              ENGLISH_DIAGRAM: (1536, 1024),
+              JAPANESE_DIAGRAM: (1448, 1086),
+          }
+          for diagram, dimensions in expected_dimensions.items():
+              data = diagram.read_bytes()
+              assert data.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+              assert data[12:16] == b"IHDR"
+              assert struct.unpack(">II", data[16:24]) == dimensions
+              assert diagram.stat().st_size > 5_000
+          '''
+          assert old in test
+          test_path.write_text(test.replace(old, new))
+          PY
+
+          rm "$assets/wandb-workflow-overview-en.svg"
+          rm "$assets/wandb-workflow-overview-ja.svg"
+          rm .github/workflows/import-wandb-diagrams.yml
+
+          python -m pytest tests/integrations/wandb_artifacts/test_showcase_localization.py
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'docs: use supplied W&B workflow diagrams'
+          git push
