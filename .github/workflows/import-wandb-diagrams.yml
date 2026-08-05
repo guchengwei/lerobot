@@ -24,7 +24,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          assets=examples/wandb_showcase/assets
           curl --fail --location --retry 3 \
             https://github.com/user-attachments/assets/97eb417f-cd69-41db-ba78-7ad2503381b0 \
             --output /tmp/wandb-workflow-overview-en.png
@@ -32,31 +31,39 @@ jobs:
             https://github.com/user-attachments/assets/30906c5b-d7eb-400c-ab07-e2773fa1c7e5 \
             --output /tmp/wandb-workflow-overview-ja.png
 
-          command -v ffmpeg
-          command -v ffprobe
-          ffmpeg -hide_banner -loglevel error -y \
-            -i /tmp/wandb-workflow-overview-en.png -q:v 2 \
-            "$assets/wandb-workflow-overview-en.jpg"
-          ffmpeg -hide_banner -loglevel error -y \
-            -i /tmp/wandb-workflow-overview-ja.png -q:v 2 \
-            "$assets/wandb-workflow-overview-ja.jpg"
-
-          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$assets/wandb-workflow-overview-en.jpg")" = 1536x1024
-          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$assets/wandb-workflow-overview-ja.jpg")" = 1448x1086
-
+          python -m pip install --disable-pip-version-check pillow
           python - <<'PY'
           from pathlib import Path
 
+          from PIL import Image
+
           showcase = Path("examples/wandb_showcase")
           diagrams = (
-              showcase / "assets" / "wandb-workflow-overview-en.jpg",
-              showcase / "assets" / "wandb-workflow-overview-ja.jpg",
+              (
+                  Path("/tmp/wandb-workflow-overview-en.png"),
+                  showcase / "assets" / "wandb-workflow-overview-en.jpg",
+                  (1536, 1024),
+              ),
+              (
+                  Path("/tmp/wandb-workflow-overview-ja.png"),
+                  showcase / "assets" / "wandb-workflow-overview-ja.jpg",
+                  (1448, 1086),
+              ),
           )
-          for diagram in diagrams:
-              data = diagram.read_bytes()
-              assert data.startswith(b"\xff\xd8\xff"), diagram
-              assert data.endswith(b"\xff\xd9"), diagram
-              assert 5_000 < diagram.stat().st_size <= 1024 * 1024, diagram
+          for source, destination, expected_dimensions in diagrams:
+              with Image.open(source) as image:
+                  assert image.size == expected_dimensions, source
+                  rgba = image.convert("RGBA")
+                  background = Image.new("RGB", rgba.size, "white")
+                  background.paste(rgba, mask=rgba.getchannel("A"))
+                  background.save(destination, "JPEG", quality=90, optimize=True, progressive=True)
+
+              data = destination.read_bytes()
+              assert data.startswith(b"\xff\xd8\xff"), destination
+              assert data.endswith(b"\xff\xd9"), destination
+              assert 5_000 < destination.stat().st_size <= 1024 * 1024, destination
+              with Image.open(destination) as converted:
+                  assert converted.size == expected_dimensions, destination
 
           replacements = {
               showcase / "README.md": (
@@ -93,6 +100,7 @@ jobs:
           test_path.write_text(test.replace(old, new))
           PY
 
+          assets=examples/wandb_showcase/assets
           rm "$assets/wandb-workflow-overview-en.svg"
           rm "$assets/wandb-workflow-overview-ja.svg"
           rm .github/workflows/import-wandb-diagrams.yml
