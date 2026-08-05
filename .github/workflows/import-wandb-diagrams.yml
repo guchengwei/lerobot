@@ -86,12 +86,13 @@ jobs:
           test = test.replace("wandb-workflow-overview-ja.svg", "wandb-workflow-overview-ja.jpg")
           start = test.index("    for diagram in (ENGLISH_DIAGRAM, JAPANESE_DIAGRAM):")
           end = test.index("\n\n\ndef test_localized_manual_uses_the_same_commands_as_english", start)
-          replacement = '''    for diagram in (ENGLISH_DIAGRAM, JAPANESE_DIAGRAM):
-              data = diagram.read_bytes()
-              assert data.startswith(b"\\xff\\xd8\\xff")
-              assert data.endswith(b"\\xff\\xd9")
-              assert 5_000 < diagram.stat().st_size <= 1024 * 1024
-          '''
+          replacement = (
+              "    for diagram in (ENGLISH_DIAGRAM, JAPANESE_DIAGRAM):\n"
+              "        data = diagram.read_bytes()\n"
+              "        assert data.startswith(b\"\\xff\\xd8\\xff\")\n"
+              "        assert data.endswith(b\"\\xff\\xd9\")\n"
+              "        assert 5_000 < diagram.stat().st_size <= 1024 * 1024\n"
+          )
           test_path.write_text(test[:start] + replacement + test[end:])
           PY
 
