@@ -20,8 +20,8 @@ REPO_ROOT = Path(__file__).parents[3]
 SHOWCASE = REPO_ROOT / "examples" / "wandb_showcase"
 ENGLISH = SHOWCASE / "README.md"
 JAPANESE = SHOWCASE / "README.ja.md"
-ENGLISH_DIAGRAM = SHOWCASE / "assets" / "wandb-workflow-overview-en.svg"
-JAPANESE_DIAGRAM = SHOWCASE / "assets" / "wandb-workflow-overview-ja.svg"
+ENGLISH_DIAGRAM = SHOWCASE / "assets" / "wandb-workflow-overview-en.jpg"
+JAPANESE_DIAGRAM = SHOWCASE / "assets" / "wandb-workflow-overview-ja.jpg"
 _BASH_BLOCK = re.compile(r"```bash\n(.*?)```", re.S)
 
 
@@ -35,14 +35,15 @@ def test_manuals_link_to_each_other_and_render_local_diagrams() -> None:
 
     assert "README.ja.md" in english
     assert "README.md" in japanese
-    assert "./assets/wandb-workflow-overview-en.svg" in english
-    assert "./assets/wandb-workflow-overview-ja.svg" in japanese
+    assert "./assets/wandb-workflow-overview-en.jpg" in english
+    assert "./assets/wandb-workflow-overview-ja.jpg" in japanese
 
     for diagram in (ENGLISH_DIAGRAM, JAPANESE_DIAGRAM):
-        text = diagram.read_text()
-        assert text.startswith("<svg")
-        assert "Conceptual overview" in text or "概念図" in text
-        assert diagram.stat().st_size > 5_000
+        data = diagram.read_bytes()
+        assert data.startswith(b"\xff\xd8\xff")
+        assert data.endswith(b"\xff\xd9")
+        assert 5_000 < diagram.stat().st_size <= 1024 * 1024
+
 
 
 def test_localized_manual_uses_the_same_commands_as_english() -> None:
