@@ -45,7 +45,6 @@ def test_manuals_link_to_each_other_and_render_local_diagrams() -> None:
         assert 5_000 < diagram.stat().st_size <= 1024 * 1024
 
 
-
 def test_localized_manual_uses_the_same_commands_as_english() -> None:
     assert _bash_blocks(JAPANESE) == _bash_blocks(ENGLISH)
 
