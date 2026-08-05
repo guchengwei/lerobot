@@ -4,9 +4,9 @@ permissions:
   contents: write
 
 on:
-  push:
+  pull_request:
     branches:
-      - docs/use-supplied-wandb-diagrams
+      - main
 
 jobs:
   import-diagrams:
@@ -95,7 +95,14 @@ jobs:
           rm "$assets/wandb-workflow-overview-ja.svg"
           rm .github/workflows/import-wandb-diagrams.yml
 
-          python -m pytest tests/integrations/wandb_artifacts/test_showcase_localization.py
+          python - <<'PY'
+          import runpy
+
+          tests = runpy.run_path("tests/integrations/wandb_artifacts/test_showcase_localization.py")
+          tests["test_manuals_link_to_each_other_and_render_local_diagrams"]()
+          tests["test_localized_manual_uses_the_same_commands_as_english"]()
+          tests["test_japanese_manual_keeps_product_and_runtime_terms_in_english"]()
+          PY
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
