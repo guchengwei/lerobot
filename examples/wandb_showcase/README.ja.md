@@ -205,12 +205,15 @@ lerobot-wandb rollout upload \
 
 upload Run は policy を input lineage edge として参照し、model byte を再 download しません。rollout は
 training dataset と区別された `rollout` Artifact として publish されます。episode 数、成功数、success rate、
-frame 数、duration、requested/resolved policy ref、代表 video が記録され、完全な rollout data は Artifact に
-保存されます。
+frame 数、duration、requested/resolved policy ref が記録されます。完全な rollout data は **元の
+encoding のまま** Artifact に保存されます(LeRobot の既定 video codec は AV1 です)。
 
-> **代表 video について:** Dataset v3 では、1 つの `.mp4` に file-size target の範囲で複数 episode が
-> 連結される場合があります。そのため W&B UI に表示される clip は単一 episode とは限りません。対象の
-> episode は Run summary の `representative_video_episodes` に記録されます。
+> **代表 video について:** 代表 clip は決定的に選択され、追加コマンドなしで browser 互換の
+> H.264/yuv420p preview に transcode され、Run media として自動記録されます。この preview は表示用の
+> 派生 data に過ぎず、Artifact には含まれず、学習 data として使うべきものではありません。Dataset v3
+> では、1 つの `.mp4` に file-size target の範囲で複数 episode が連結される場合があります。そのため
+> W&B UI に表示される clip は単一 episode とは限りません。対象の episode は Run summary の
+> `representative_video_episodes` に記録されます。
 
 ## 7. 評価済み policy を promote する
 

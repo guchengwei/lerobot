@@ -219,12 +219,16 @@ than recording nothing because the lineage looks authoritative.
 
 The upload Run declares the model as an **input** — resolved for lineage and never downloaded — and
 the rollout as an **output** of type `rollout`, distinct from a training dataset. It logs episode
-count, success count and rate, frame count, duration, requested and resolved model refs, and one
-deterministically selected representative video. The complete rollout remains in the Artifact.
+count, success count and rate, frame count, duration, and requested and resolved model refs. The
+complete rollout remains in the Artifact with its **original encoding unchanged** (the default
+LeRobot video codec is AV1).
 
-> **About the representative video:** in Dataset v3, a single `.mp4` may contain as many episodes as
-> fit under the writer's file-size target, so the UI clip can represent an episode span. The Run
-> summary records the included episodes under `representative_video_episodes`.
+> **About the representative video:** one clip is selected deterministically and, with no extra
+> command, transcoded to a browser-compatible H.264/yuv420p preview that is logged automatically as
+> run media. That preview is a _display derivative only_ — it is never part of the Artifact, and it
+> is not the data anything should train on. In Dataset v3, a single `.mp4` may contain as many
+> episodes as fit under the writer's file-size target, so the UI clip can represent an episode
+> span. The Run summary records the included episodes under `representative_video_episodes`.
 
 ## 7. Promote what worked
 

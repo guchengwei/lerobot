@@ -40,11 +40,16 @@ lerobot-wandb model promote --ref my-team/my-project/pick-cube-policy:v3 --alias
 lerobot-wandb rollout upload --root ./rollout_pick-cube --entity my-team --project my-project \
     --name pick-cube-rollout --model-ref my-team/my-project/pick-cube-policy:v3 \
     --episodes-succeeded 7
+
+The rollout Artifact keeps the original (AV1) videos unchanged; the one representative video is
+additionally transcoded to a browser-compatible H.264/yuv420p preview and logged as run media.
 ```
 """
 
 import argparse
+import contextlib
 import logging
+import tempfile
 from pathlib import Path
 
 import wandb
@@ -62,6 +67,7 @@ from .refs import parse_artifact_ref
 from .rollout import (
     ROLLOUT_ARTIFACT_TYPE,
     RolloutSummary,
+    prepare_rollout_preview,
     select_representative_video,
     validate_success_count,
 )
@@ -218,57 +224,64 @@ def cmd_model_promote(args: argparse.Namespace) -> None:
 
 def cmd_rollout_upload(args: argparse.Namespace) -> None:
     # Everything local and fallible happens before `wandb.init` creates a run: a bad directory, an
-    # impossible success count or a malformed model ref must not leave an empty run behind.
+    # impossible success count, a malformed model ref or an unavailable preview encoder must not
+    # leave an empty run behind.
     metadata = inspect_dataset_directory(args.root)
     validate_success_count(args.episodes_succeeded, metadata.total_episodes)
     parsed_model_ref = parse_artifact_ref(args.model_ref)
     video = select_representative_video(args.root)
     aliases = args.aliases or ["latest"]
 
-    run = wandb.init(entity=args.entity, project=args.project, job_type="rollout_upload", mode="online")
-    try:
-        # Lineage only: the model that produced this rollout is referenced, never downloaded.
-        model = declare_input(run, parsed_model_ref, expected_type=MODEL_ARTIFACT_TYPE)
-        summary = RolloutSummary.build(
-            metadata,
-            successes=args.episodes_succeeded,
-            model_requested_ref=model.requested_ref,
-            model_resolved_ref=model.resolved_ref,
-            video=video,
-        )
-        result = upload_directory(
-            run,
-            args.root,
-            name=args.name,
-            artifact_type=ROLLOUT_ARTIFACT_TYPE,
-            aliases=aliases,
-            metadata={**metadata.to_wandb_metadata(), **summary.to_wandb_metadata()},
-        )
-        run.summary.update(summary.to_wandb_metadata())
+    with contextlib.ExitStack() as exit_stack:
+        preview_path: Path | None = None
         if video is not None:
-            # Exactly one video reaches the run UI. The rest stay in the Artifact: a rollout can be
-            # hundreds of episodes, and logging each as run media would duplicate the whole dataset
-            # into W&B's media store for no added information.
-            run.log(
-                {"rollout_video": wandb.Video(str(args.root / video.path), fps=metadata.fps, format="mp4")}
-            )
-    finally:
-        run.finish()
+            # A display derivative only, for the run UI: browsers play H.264/yuv420p, not the
+            # dataset's AV1. It lives in a caller-owned temp dir (not the rollout root) so it can
+            # never enter the Artifact manifest; the original stays in the Artifact unchanged.
+            tmp_dir = Path(exit_stack.enter_context(tempfile.TemporaryDirectory()))
+            preview_path = prepare_rollout_preview(args.root / video.path, tmp_dir / "preview.mp4")
 
-    print(f"Uploaded rollout artifact: {result.resolved_ref}")
-    print(f"Aliases applied: {', '.join(aliases)}")
-    print(f"Model input (lineage): {model.resolved_ref}")
-    print(
-        f"Episodes: {summary.episodes} | successes: {summary.successes} "
-        f"| success rate: {summary.success_rate:.1%} | duration: {summary.duration_s:.1f}s"
-    )
-    if video is None:
-        print("No video in this rollout dataset: nothing logged as run media.")
-    else:
+        run = wandb.init(entity=args.entity, project=args.project, job_type="rollout_upload", mode="online")
+        try:
+            # Lineage only: the model that produced this rollout is referenced, never downloaded.
+            model = declare_input(run, parsed_model_ref, expected_type=MODEL_ARTIFACT_TYPE)
+            summary = RolloutSummary.build(
+                metadata,
+                successes=args.episodes_succeeded,
+                model_requested_ref=model.requested_ref,
+                model_resolved_ref=model.resolved_ref,
+                video=video,
+            )
+            result = upload_directory(
+                run,
+                args.root,
+                name=args.name,
+                artifact_type=ROLLOUT_ARTIFACT_TYPE,
+                aliases=aliases,
+                metadata={**metadata.to_wandb_metadata(), **summary.to_wandb_metadata()},
+            )
+            run.summary.update(summary.to_wandb_metadata())
+            if preview_path is not None:
+                # Path only — no fps=/format=: those don't transcode path input and lie about it.
+                run.log({"rollout_video": wandb.Video(str(preview_path))})
+        finally:
+            # Inside the `with`: the preview temp dir must outlive run.finish().
+            run.finish()
+
+        print(f"Uploaded rollout artifact: {result.resolved_ref}")
+        print(f"Aliases applied: {', '.join(aliases)}")
+        print(f"Model input (lineage): {model.resolved_ref}")
         print(
-            f"Representative video: {video.path} ({video.video_key}, "
-            f"episode(s) {', '.join(str(index) for index in video.episodes)})"
+            f"Episodes: {summary.episodes} | successes: {summary.successes} "
+            f"| success rate: {summary.success_rate:.1%} | duration: {summary.duration_s:.1f}s"
         )
+        if video is None:
+            print("No video in this rollout dataset: nothing logged as run media.")
+        else:
+            print(
+                f"Representative video: {video.path} ({video.video_key}, "
+                f"episode(s) {', '.join(str(index) for index in video.episodes)})"
+            )
 
 
 def _add_upload_args(parser: argparse.ArgumentParser) -> None:

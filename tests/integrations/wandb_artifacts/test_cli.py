@@ -24,9 +24,14 @@ pytest.importorskip("datasets", reason="datasets is required (install lerobot[da
 from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.pyav_utils import get_codec
 from lerobot.integrations.wandb_artifacts import cli
 from lerobot.integrations.wandb_artifacts.inspect import DatasetDirectoryError, ModelDirectoryError
 from lerobot.integrations.wandb_artifacts.store import ArtifactTypeMismatchError, MaterializedArtifact
+
+require_h264 = pytest.mark.skipif(
+    get_codec("h264") is None, reason="'h264' encoder not in local FFmpeg build"
+)
 
 _ACTION_FEATURE = {"dtype": "float32", "shape": (6,), "names": None}
 
@@ -659,6 +664,7 @@ def test_rollout_upload_rejects_a_directory_that_is_not_a_dataset(tmp_path, monk
     assert init_calls == []
 
 
+@require_h264
 def test_rollout_upload_happy_path(tmp_path, monkeypatch, capsys):
     rollout_root = tmp_path / "rollout"
     _write_rollout_dataset(rollout_root, episodes=3, with_video=True)
@@ -680,8 +686,15 @@ def test_rollout_upload_happy_path(tmp_path, monkeypatch, capsys):
         return _rollout_upload_result()
 
     monkeypatch.setattr(cli, "upload_directory", _fake_upload)
-    videos = []
-    monkeypatch.setattr(cli.wandb, "Video", lambda path, **kwargs: videos.append(path) or f"video:{path}")
+    video_calls = []
+
+    def _fake_video(path, **kw):
+        # The moment the CLI hands the path to wandb: the derived preview must exist right then.
+        assert Path(path).is_file()
+        video_calls.append((path, kw))
+        return f"video:{path}"
+
+    monkeypatch.setattr(cli.wandb, "Video", _fake_video)
 
     cli.main(_rollout_argv(rollout_root))
 
@@ -708,9 +721,17 @@ def test_rollout_upload_happy_path(tmp_path, monkeypatch, capsys):
     assert logged_summary["success_rate"] == pytest.approx(2 / 3)
     assert logged_summary.items() <= metadata.items()
 
-    # Exactly one video reaches the run; the rest of the dataset stays in the artifact only.
-    assert len(videos) == 1
-    assert Path(videos[0]) == sorted(rollout_root.rglob("*.mp4"))[0]
+    # Exactly one derived preview reaches the run, and nothing else: the original (AV1) video stays
+    # in the artifact root, the preview lives outside it, and no fps=/format= kwargs are passed
+    # (those don't transcode path input and would lie about it).
+    assert len(video_calls) == 1
+    preview_path_arg, video_kwargs = video_calls[0]
+    assert video_kwargs == {}  # fps=/format= removed
+    assert rollout_root not in Path(preview_path_arg).parents  # outside the artifact root
+    assert sorted(rollout_root.rglob("*.mp4")) == [
+        rollout_root / "videos/observation.images.cam/chunk-000/file-000.mp4"
+    ]  # original AV1 still the only file in the artifact root
+    assert preview_path_arg != str(sorted(rollout_root.rglob("*.mp4"))[0])  # not the source
     assert run.log.call_count == 1
 
     # The recorded path locates the file inside the artifact, where the metadata will be read from
@@ -735,12 +756,61 @@ def test_rollout_upload_without_video_logs_no_run_media(tmp_path, monkeypatch, c
     monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: run)
     monkeypatch.setattr(cli, "declare_input", lambda *a, **kw: _model_input_result())
     monkeypatch.setattr(cli, "upload_directory", lambda *a, **kw: _rollout_upload_result())
+    preview_prep = MagicMock()
+    monkeypatch.setattr(cli, "prepare_rollout_preview", preview_prep)
 
     cli.main(_rollout_argv(rollout_root))
 
+    preview_prep.assert_not_called()
     run.log.assert_not_called()
     run.finish.assert_called_once()
     assert "nothing logged as run media" in capsys.readouterr().out
+
+
+def test_rollout_upload_preview_failure_aborts_before_wandb_init(tmp_path, monkeypatch):
+    """A preview that cannot be prepared (e.g. no h264 encoder) must not create an empty run."""
+    rollout_root = tmp_path / "rollout"
+    _write_rollout_dataset(rollout_root, episodes=2, with_video=True)
+
+    def _boom(*a, **kw):
+        raise RuntimeError("no h264 encoder")
+
+    monkeypatch.setattr(cli, "prepare_rollout_preview", _boom)
+    init_calls = []
+    monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: init_calls.append(kwargs) or _fake_run())
+
+    with pytest.raises(RuntimeError, match="no h264 encoder"):
+        cli.main(_rollout_argv(rollout_root))
+
+    assert init_calls == []
+
+
+@require_h264
+def test_rollout_upload_preview_still_exists_when_run_finishes(tmp_path, monkeypatch):
+    """The temp preview dir outlives run.finish() — wandb reads the file at finish time."""
+    rollout_root = tmp_path / "rollout"
+    _write_rollout_dataset(rollout_root, episodes=2, with_video=True)
+
+    run = _fake_run()
+    monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: run)
+    monkeypatch.setattr(cli, "declare_input", lambda *a, **kw: _model_input_result())
+    monkeypatch.setattr(cli, "upload_directory", lambda *a, **kw: _rollout_upload_result())
+    video_calls = []
+    monkeypatch.setattr(
+        cli.wandb, "Video", lambda path, **kw: video_calls.append((path, kw)) or f"video:{path}"
+    )
+
+    def _finish_checks_preview_alive():
+        # The exact moment wandb reads the file: run.log already happened (video_calls populated),
+        # so a premature temp-dir cleanup would surface right here as a missing file.
+        preview_path = Path(video_calls[0][0])
+        assert preview_path.is_file()
+
+    run.finish.side_effect = _finish_checks_preview_alive
+
+    cli.main(_rollout_argv(rollout_root))
+
+    run.finish.assert_called_once()
 
 
 def test_rollout_upload_finishes_the_run_when_the_model_ref_is_not_a_model(tmp_path, monkeypatch):
