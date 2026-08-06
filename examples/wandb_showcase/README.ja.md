@@ -1,6 +1,6 @@
 # W&B-native LeRobot pipeline (SO-101) — 日本語マニュアル
 
-![W&B-native SO-101 workflow 日本語版](./assets/wandb-workflow-overview-ja.svg)
+![W&B-native SO-101 workflow 日本語版](./assets/wandb-workflow-overview-ja.jpg)
 
 [English manual](./README.md) · 日本語
 
