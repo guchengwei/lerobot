@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -783,6 +784,52 @@ def test_rollout_upload_preview_failure_aborts_before_wandb_init(tmp_path, monke
         cli.main(_rollout_argv(rollout_root))
 
     assert init_calls == []
+
+
+def test_rollout_upload_rejects_a_preview_temp_dir_inside_the_rollout_root(tmp_path, monkeypatch):
+    """A preview inside the artifact root would be uploaded with it; the CLI refuses before any
+    run exists, whatever the temp-dir mechanism returns.
+    """
+    rollout_root = tmp_path / "rollout"
+    _write_rollout_dataset(rollout_root, episodes=2, with_video=True)
+
+    real_temporary_directory = tempfile.TemporaryDirectory
+    monkeypatch.setattr(
+        cli.tempfile,
+        "TemporaryDirectory",
+        lambda *a, **kw: real_temporary_directory(dir=rollout_root),
+    )
+    init_calls = []
+    monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: init_calls.append(kwargs) or _fake_run())
+
+    with pytest.raises(ValueError, match="outside the rollout root"):
+        cli.main(_rollout_argv(rollout_root))
+
+    assert init_calls == []
+
+
+@require_h264
+def test_rollout_upload_preview_ignores_a_tmpdir_inside_the_rollout_root(tmp_path, monkeypatch):
+    """TMPDIR must not be able to place the preview inside the artifact: the temp dir is pinned
+    beside the rollout root instead of wherever the environment points.
+    """
+    rollout_root = tmp_path / "rollout"
+    _write_rollout_dataset(rollout_root, episodes=2, with_video=True)
+
+    monkeypatch.setenv("TMPDIR", str(rollout_root))
+    run = _fake_run()
+    monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: run)
+    monkeypatch.setattr(cli, "declare_input", lambda *a, **kw: _model_input_result())
+    monkeypatch.setattr(cli, "upload_directory", lambda *a, **kw: _rollout_upload_result())
+    video_calls = []
+    monkeypatch.setattr(cli.wandb, "Video", lambda path, **kw: video_calls.append(path) or f"video:{path}")
+
+    cli.main(_rollout_argv(rollout_root))
+
+    assert len(video_calls) == 1
+    preview = Path(video_calls[0])
+    assert rollout_root not in preview.parents
+    assert preview.parent.parent == rollout_root.parent  # pinned beside the root, not under it
 
 
 @require_h264

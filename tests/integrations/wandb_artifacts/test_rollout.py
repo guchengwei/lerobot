@@ -15,11 +15,13 @@
 
 from pathlib import Path
 
-import av
 import numpy as np
 import pytest
 
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+pytest.importorskip("av", reason="av is required (install lerobot[dataset])")
+
+import av
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.pyav_utils import get_codec
@@ -218,7 +220,11 @@ def test_prepare_rollout_preview_writes_outside_rollout_root(tmp_path):
     assert root not in destination.parents
 
 
+@require_h264
 def test_prepare_rollout_preview_propagates_failure(tmp_path):
-    """A missing source fails before any W&B run could exist; the caller sees a clear exception."""
+    """A missing source fails before any W&B run could exist; the caller sees a clear exception.
+
+    Requires h264: without it, the encoder config raises before the missing source is ever opened.
+    """
     with pytest.raises(av.error.FileNotFoundError):
         prepare_rollout_preview(tmp_path / "missing.mp4", tmp_path / "out.mp4")

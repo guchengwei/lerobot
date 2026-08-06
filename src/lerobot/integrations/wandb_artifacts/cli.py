@@ -238,8 +238,20 @@ def cmd_rollout_upload(args: argparse.Namespace) -> None:
             # A display derivative only, for the run UI: browsers play H.264/yuv420p, not the
             # dataset's AV1. It lives in a caller-owned temp dir (not the rollout root) so it can
             # never enter the Artifact manifest; the original stays in the Artifact unchanged.
-            tmp_dir = Path(exit_stack.enter_context(tempfile.TemporaryDirectory()))
-            preview_path = prepare_rollout_preview(args.root / video.path, tmp_dir / "preview.mp4")
+            # The temp dir is pinned next to the rollout root — never left to TMPDIR, which could
+            # point under the root and put the preview inside the Artifact being uploaded.
+            root = args.root.resolve()
+            tmp_dir = Path(
+                exit_stack.enter_context(
+                    tempfile.TemporaryDirectory(dir=root.parent, prefix=f"{root.name}-preview-")
+                )
+            ).resolve()
+            if tmp_dir == root or root in tmp_dir.parents:
+                raise ValueError(
+                    f"The preview temp dir {tmp_dir} must be outside the rollout root {root}: "
+                    "a preview inside the artifact root would be uploaded with it."
+                )
+            preview_path = prepare_rollout_preview(root / video.path, tmp_dir / "preview.mp4")
 
         run = wandb.init(entity=args.entity, project=args.project, job_type="rollout_upload", mode="online")
         try:
