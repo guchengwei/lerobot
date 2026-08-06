@@ -118,6 +118,8 @@ training = [
     "wandb>=0.24.1,<0.28.0",
     "lerobot[accelerate-dep]",
 ]
+# `lerobot-wandb workspace create` only; never required by Artifact upload/download commands.
+wandb-workspace = ["wandb-workspaces>=0.4.0,<0.5.0"]
 hardware = [
     "lerobot[pynput-dep]",
     "lerobot[pyserial-dep]",
@@ -290,6 +292,7 @@ all = [
     # Feature-scoped extras
     "lerobot[dataset]",
     "lerobot[training]",
+    "lerobot[wandb-workspace]",
     "lerobot[hardware]",
     "lerobot[viz]",
     # NOTE(resolver hint): scipy is pulled in transitively via lerobot[scipy-dep] through

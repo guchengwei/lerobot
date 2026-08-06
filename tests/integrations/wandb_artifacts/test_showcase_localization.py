@@ -65,5 +65,8 @@ def test_japanese_manual_keeps_product_and_runtime_terms_in_english() -> None:
         "runtime cache",
         "control loop",
         "immutable",
+        "Workspace",
+        "panel",
+        "media key",
     ):
         assert term in japanese

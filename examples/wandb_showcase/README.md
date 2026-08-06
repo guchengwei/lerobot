@@ -260,6 +260,43 @@ alias unchanged rather than pointing it at a version that never reached the Regi
 Whether a rollout justifies promotion remains an operator decision made from the Run. This workflow
 does not compute it.
 
+## 8. Create a reusable rollout-review Workspace (optional)
+
+Rollout uploads always appear as Runs in the project, with or without this step. This command
+additionally sets up one curated **Workspace** — a project review view — that collects the rollout
+Runs in one place: a playable gallery of the `rollout_video` media previews, success-rate and
+rollout-fact charts, and a Runs table exposing the requested and resolved model refs. Creating it
+is project configuration, not a Run: no `wandb.init` happens and nothing is uploaded.
+
+The command needs the optional extra:
+
+```bash
+pip install "lerobot[wandb-workspace]"
+```
+
+One-time project setup:
+
+```bash
+lerobot-wandb workspace create \
+  --entity "$WANDB_ENTITY" \
+  --project "$WANDB_PROJECT"
+```
+
+The command prints the Workspace URL. Re-running it is safe: a Workspace this command created
+is reused instead of duplicated, and other Workspaces are never touched. (A Workspace you built
+manually in the UI under the same name is not adopted — the command only recognizes its own.)
+Uploads never create or modify a workspace — the two are independent.
+
+`--replace` refreshes only the named workspace with the deterministic LeRobot template, for example
+after an upgrade changed the panel set:
+
+```bash
+lerobot-wandb workspace create \
+  --entity "$WANDB_ENTITY" \
+  --project "$WANDB_PROJECT" \
+  --replace
+```
+
 ## Where things live afterwards
 
 | Thing                     | Where                                                   |
