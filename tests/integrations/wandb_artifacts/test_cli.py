@@ -26,7 +26,7 @@ from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.pyav_utils import get_codec
-from lerobot.integrations.wandb_artifacts import cli
+from lerobot.integrations.wandb_artifacts import cli, workspace as cli_ws
 from lerobot.integrations.wandb_artifacts.inspect import DatasetDirectoryError, ModelDirectoryError
 from lerobot.integrations.wandb_artifacts.store import ArtifactTypeMismatchError, MaterializedArtifact
 
@@ -1040,3 +1040,95 @@ def test_model_promote_passes_the_parsed_ref_through_and_never_starts_a_run(monk
     assert "production" in out
     assert "abc123digest" in out
     assert "pick-cube-policy" in out
+
+
+# ---------------------------------------------------------------------------
+# workspace create
+# ---------------------------------------------------------------------------
+
+
+def _workspace_result(status):
+    return cli_ws.WorkspaceResult(
+        status=status, url="https://wandb.ai/my-team/my-project?nw=lerobot-rollouts"
+    )
+
+
+def test_workspace_create_requires_entity_and_project():
+    parser = cli.build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["workspace", "create", "--project", "p"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["workspace", "create", "--entity", "e"])
+
+
+def test_workspace_create_parser_defaults_and_flags():
+    args = cli.build_parser().parse_args(
+        ["workspace", "create", "--entity", "my-team", "--project", "my-project"]
+    )
+
+    assert args.func is cli.cmd_workspace_create
+    assert args.name == cli_ws.DEFAULT_WORKSPACE_NAME
+    assert args.replace is False
+
+    with_replace = cli.build_parser().parse_args(
+        ["workspace", "create", "--entity", "e", "--project", "p", "--replace"]
+    )
+    assert with_replace.replace is True
+
+
+def test_workspace_create_never_starts_a_run(monkeypatch, capsys):
+    """Creating a workspace is project configuration, not a data-producing run."""
+
+    def _no_init(**kwargs):
+        raise AssertionError("workspace create must not call wandb.init")
+
+    monkeypatch.setattr(cli.wandb, "init", _no_init)
+    calls = []
+
+    def _create(**kwargs):
+        calls.append(kwargs)
+        return _workspace_result("created")
+
+    monkeypatch.setattr(cli, "create_rollout_workspace", _create)
+
+    cli.main(["workspace", "create", "--entity", "my-team", "--project", "my-project"])
+
+    assert calls == [
+        {
+            "entity": "my-team",
+            "project": "my-project",
+            "name": "LeRobot Rollouts",
+            "replace": False,
+        }
+    ]
+    out = capsys.readouterr().out
+    assert "Created workspace: https://wandb.ai/my-team/my-project?nw=lerobot-rollouts" in out
+
+
+@pytest.mark.parametrize("status", ["created", "reused", "replaced"])
+def test_workspace_create_reports_what_it_did(monkeypatch, capsys, status):
+    monkeypatch.setattr(
+        cli,
+        "create_rollout_workspace",
+        lambda **kwargs: _workspace_result(status),
+    )
+
+    cli.main(["workspace", "create", "--entity", "my-team", "--project", "my-project"])
+
+    out = capsys.readouterr().out
+    assert f"{status.capitalize()} workspace: https://wandb.ai/my-team/my-project?nw=lerobot-rollouts" in out
+
+
+def test_workspace_create_failures_are_concise_and_nonzero(monkeypatch, capsys):
+    def _boom(**kwargs):
+        raise cli_ws.WorkspaceDependencyError("Install it with `pip install 'lerobot[wandb-workspace]'`.")
+
+    monkeypatch.setattr(cli, "create_rollout_workspace", _boom)
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["workspace", "create", "--entity", "my-team", "--project", "my-project"])
+
+    assert excinfo.value.code == 1
+    out = capsys.readouterr().out
+    assert "lerobot[wandb-workspace]" in out

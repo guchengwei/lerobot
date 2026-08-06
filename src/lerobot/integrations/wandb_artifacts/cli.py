@@ -78,6 +78,13 @@ from .store import (
     promote_model,
     upload_directory,
 )
+from .workspace import (
+    DEFAULT_WORKSPACE_NAME,
+    WorkspaceDependencyError,
+    WorkspaceNameCollisionError,
+    WorkspaceProjectNotFoundError,
+    create_rollout_workspace,
+)
 
 DATASET_ARTIFACT_TYPE = "dataset"
 
@@ -296,6 +303,29 @@ def cmd_rollout_upload(args: argparse.Namespace) -> None:
             )
 
 
+def cmd_workspace_create(args: argparse.Namespace) -> None:
+    # Deliberately no `wandb.init`: creating a workspace is project configuration, not a
+    # data-producing run. Failures — the actionable classes plus ValueError, the SDK's own
+    # not-found/parse error — get a concise actionable line and a nonzero exit instead of
+    # a traceback. Unexpected exceptions still surface as tracebacks.
+    try:
+        result = create_rollout_workspace(
+            entity=args.entity,
+            project=args.project,
+            name=args.name,
+            replace=args.replace,
+        )
+    except (
+        WorkspaceDependencyError,
+        WorkspaceProjectNotFoundError,
+        WorkspaceNameCollisionError,
+        ValueError,
+    ) as error:
+        print(f"Error: {error}")
+        raise SystemExit(1) from error
+    print(f"{result.status.capitalize()} workspace: {result.url}")
+
+
 def _add_upload_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--root", type=Path, required=True, help="Local directory to upload.")
     parser.add_argument("--entity", default=None, help="W&B entity. Defaults to your W&B default entity.")
@@ -412,6 +442,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="How many episodes the operator judged successful. Not auto-detected.",
     )
     rollout_upload_parser.set_defaults(func=cmd_rollout_upload)
+
+    workspace_parser = resource_subparsers.add_parser(
+        "workspace", help="Set up a reusable rollout-review workspace. No run is created."
+    )
+    workspace_action_subparsers = workspace_parser.add_subparsers(dest="action", required=True)
+
+    workspace_create_parser = workspace_action_subparsers.add_parser(
+        "create",
+        help="Create (or reuse, or with --replace refresh) the named rollout-review workspace "
+        "in a project. Idempotent: re-running never duplicates or mutates other workspaces.",
+    )
+    workspace_create_parser.add_argument("--entity", required=True, help="W&B entity that owns the project.")
+    workspace_create_parser.add_argument(
+        "--project", required=True, help="W&B project to create the workspace in."
+    )
+    workspace_create_parser.add_argument(
+        "--name",
+        default=DEFAULT_WORKSPACE_NAME,
+        help=f"Display name of the workspace. Defaults to {DEFAULT_WORKSPACE_NAME!r}.",
+    )
+    workspace_create_parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="If the named workspace already exists, refresh it with the deterministic "
+        "LeRobot template instead of reusing it as-is. Only the named workspace is touched.",
+    )
+    workspace_create_parser.set_defaults(func=cmd_workspace_create)
 
     return parser
 
