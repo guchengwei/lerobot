@@ -57,13 +57,17 @@ def _resolved_dataset_artifact_ref(cfg: TrainPipelineConfig) -> str:
 
     The resolved ref lives in the `.wandb_artifact.json` sidecar `_materialize_dataset_artifact`
     writes next to the materialized dataset at `cfg.dataset.root` (see
-    `lerobot.integrations.wandb_artifacts.sidecar`) — already reachable from `cfg` alone, no W&B
+    `lerobot_wandb.sidecar`) — already reachable from `cfg` alone, no W&B
     call or extra plumbing needed. Falls back to the requested ref if the sidecar is absent,
-    unparsable, or (defensively) records a different artifact than `cfg.dataset.artifact_ref`.
+    unparsable, (defensively) records a different artifact than `cfg.dataset.artifact_ref`, or
+    the companion `lerobot-wandb` distribution is not installed at all.
     """
     requested_ref = cfg.dataset.artifact_ref
     if cfg.dataset.root is not None:
-        from lerobot.integrations.wandb_artifacts.sidecar import read_sidecar
+        try:
+            from lerobot_wandb.sidecar import read_sidecar
+        except ModuleNotFoundError:
+            return requested_ref
 
         sidecar = read_sidecar(Path(cfg.dataset.root))
         if sidecar is not None and sidecar.requested_ref == requested_ref:

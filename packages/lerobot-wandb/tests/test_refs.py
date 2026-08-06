@@ -19,7 +19,7 @@ import textwrap
 
 import pytest
 
-from lerobot.integrations.wandb_artifacts.refs import ArtifactRef, parse_artifact_ref
+from lerobot_wandb.refs import ArtifactRef, parse_artifact_ref
 
 
 def test_parse_version_form():
@@ -77,11 +77,11 @@ def test_parse_rejects_non_string_input():
         parse_artifact_ref(None)  # type: ignore[arg-type]
 
 
-def test_reference_parser_imports_without_dataset_or_wandb():
+def test_reference_parser_imports_without_dataset_wandb_or_lerobot():
     preamble = textwrap.dedent(
         """
         import builtins
-        blocked = ("datasets", "wandb")
+        blocked = ("datasets", "wandb", "lerobot")
         real_import = builtins.__import__
 
         def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -99,7 +99,7 @@ def test_reference_parser_imports_without_dataset_or_wandb():
             preamble
             + textwrap.dedent(
                 """
-                from lerobot.integrations.wandb_artifacts.refs import ArtifactRef, parse_artifact_ref
+                from lerobot_wandb.refs import ArtifactRef, parse_artifact_ref
                 assert parse_artifact_ref("entity/project/name:v0") == ArtifactRef(
                     entity="entity",
                     project="project",

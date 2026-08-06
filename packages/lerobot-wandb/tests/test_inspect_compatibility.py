@@ -18,10 +18,13 @@ import pytest
 
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
 
+pytest.importorskip("lerobot", reason="lerobot is required (install a supported lerobot release)")
+
 from lerobot.datasets.io_utils import write_info
 from lerobot.datasets.utils import DATA_DIR, STATS_PATH, DatasetInfo
-from lerobot.integrations.wandb_artifacts.inspect import DatasetDirectoryError, validate_dataset_directory
 from lerobot.utils.constants import DEFAULT_FEATURES
+
+from lerobot_wandb.inspect import DatasetDirectoryError, validate_dataset_directory
 
 
 def _write_empty_dataset(root: Path, codebase_version: str) -> Path:

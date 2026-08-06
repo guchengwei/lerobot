@@ -54,6 +54,12 @@ entity に置き換えます。
 `.venv\Scripts\Activate.ps1` で environment を有効化し、`/dev/ttyACM*` を実機に対応する `COM` port に
 置き換えてください。それ以外の CLI argument は同じです。
 
+### 0.1 Fork development environment（この manual の標準 path）
+
+fork の training integration（`lerobot-train --dataset.artifact_ref`、final model publication）
+には fork 本体が必要です。`training` extra は companion distribution `lerobot-wandb` を自動で
+導入します。
+
 ```bash
 uv sync --locked --extra core_scripts --extra feetech --extra training
 source .venv/bin/activate
@@ -63,8 +69,28 @@ export WANDB_PROJECT="so101-pick-cube"
 ```
 
 `core_scripts` は dataset と hardware stack、`feetech` は SO-101 の motor bus、`training` は
-`wandb` と `accelerate` を導入します。以降は follower が `/dev/ttyACM0`、leader が
-`/dev/ttyACM1`、OpenCV camera が index `0` にある例です。自分の hardware に合わせて変更してください。
+`wandb` と `accelerate`、そして companion の `lerobot-wandb` を導入します。以降は follower が
+`/dev/ttyACM0`、leader が `/dev/ttyACM1`、OpenCV camera が index `0` にある例です。自分の
+hardware に合わせて変更してください。
+
+### 0.2 Existing LeRobot environment（companion のみ）
+
+`lerobot-wandb` は独立して導入できる companion distribution です。すでに LeRobot（upstream または
+互換 fork）が導入されている environment を置き換えず、`lerobot` namespace には一切 file を配置しません。
+LeRobot が導入済みの environment に、そのまま追加で導入します。
+
+```bash
+pip install lerobot-wandb            # optional: lerobot-wandb[wandb-workspace] for workspace create
+```
+
+この manual の training（§3）と final model publication（§7）は fork 専用機能です。dataset/model/
+rollout Artifact の transfer、promotion、workspace creation は plain upstream LeRobot でも動作します。
+LeRobot が必要な command は起動時に導入 version を検証し（対応 range は `>=0.6.1,<0.7.0`）、
+LeRobot が無い・非対応の場合は actionable message で失敗します（`--allow-unsupported-lerobot` が
+実験的な override です）。
+
+LeRobot がまだ無い environment の場合は、`pip install 'lerobot-wandb[lerobot]'` で互換な LeRobot と
+companion をまとめて導入できます。
 
 ## 1. Teaching dataset を記録する
 
@@ -246,7 +272,7 @@ Run ではありません。`wandb.init` は呼ばれず、何も upload され�
 このコマンドには任意の extra が必要です:
 
 ```bash
-pip install "lerobot[wandb-workspace]"
+pip install "lerobot-wandb[wandb-workspace]"
 ```
 
 1 回だけの project setup:

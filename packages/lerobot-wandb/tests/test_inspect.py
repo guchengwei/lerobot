@@ -28,6 +28,8 @@ import pandas as pd
 from datasets import Dataset
 from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 
+pytest.importorskip("lerobot", reason="lerobot is required (install a supported lerobot release)")
+
 from lerobot.datasets.io_utils import load_episodes, load_info, write_info, write_tasks
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.utils import (
@@ -38,8 +40,10 @@ from lerobot.datasets.utils import (
     STATS_PATH,
     DatasetInfo,
 )
-from lerobot.integrations.wandb_artifacts import inspect as inspect_module
-from lerobot.integrations.wandb_artifacts.inspect import (
+from lerobot.utils.constants import DEFAULT_FEATURES
+
+from lerobot_wandb import lerobot_adapter as adapter_module
+from lerobot_wandb.inspect import (
     PEFT_ADAPTER_CONFIG_NAME,
     PEFT_ADAPTER_WEIGHTS_NAME,
     DatasetDirectoryError,
@@ -50,7 +54,6 @@ from lerobot.integrations.wandb_artifacts.inspect import (
     validate_dataset_directory,
     validate_model_directory,
 )
-from lerobot.utils.constants import DEFAULT_FEATURES
 
 _ACTION_FEATURE = {"dtype": "float32", "shape": (6,), "names": None}
 
@@ -353,15 +356,15 @@ def test_inspect_git_commit_matches_lerobot_checkout_head(tmp_path):
 
 
 def test_git_commit_ignores_an_enclosing_unrelated_repository(monkeypatch):
-    unrelated_root = Path(inspect_module.__file__).resolve().parents[2]
+    unrelated_root = Path(adapter_module.__file__).resolve().parents[2]
     calls = []
 
     def _fake_run(*args, **kwargs):
         calls.append((args, kwargs))
         return SimpleNamespace(returncode=0, stdout=f"{unrelated_root}\n")
 
-    monkeypatch.setattr(inspect_module.subprocess, "run", _fake_run)
-    assert inspect_module._current_git_commit() is None
+    monkeypatch.setattr(adapter_module.subprocess, "run", _fake_run)
+    assert adapter_module._git_commit_of(unrelated_root / "site-packages" / "lerobot", "src/lerobot") is None
     assert len(calls) == 1
 
 
@@ -386,7 +389,7 @@ def test_inspection_imports_without_wandb():
             preamble
             + textwrap.dedent(
                 """
-                from lerobot.integrations.wandb_artifacts import (
+                from lerobot_wandb import (
                     inspect_dataset_directory,
                     validate_dataset_directory,
                 )

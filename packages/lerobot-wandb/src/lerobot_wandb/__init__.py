@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Inc. team. All rights reserved.
+# Copyright 2026 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""W&B Artifact references plus lazily loaded inspection and transfer helpers.
+"""W&B Artifacts companion for LeRobot (``lerobot-wandb``).
+
+An independently installable distribution that coexists with an existing ``lerobot``
+install: it never installs files into the ``lerobot`` namespace and never hard-depends
+on ``lerobot``. LeRobot-dependent commands validate the installed LeRobot at runtime
+(see :mod:`lerobot_wandb.compatibility`) before running.
 
 Reference parsing has no optional dependencies. Dataset inspection is loaded only when requested,
 and SDK-backed store helpers are loaded only when requested, so each public surface retains its own
@@ -23,6 +28,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
+from .__version__ import __version__
 from .refs import ArtifactRef, parse_artifact_ref
 
 _LAZY_EXPORTS = {
@@ -83,6 +89,7 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "__version__",
     "ArtifactRef",
     "ArtifactTypeMismatchError",
     "DatasetDirectoryError",

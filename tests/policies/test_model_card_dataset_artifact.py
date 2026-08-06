@@ -25,8 +25,8 @@ from pathlib import Path
 
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.integrations.wandb_artifacts.sidecar import ArtifactSidecar, write_sidecar
 from lerobot.policies.pretrained import PreTrainedPolicy
+from lerobot_wandb.sidecar import ArtifactSidecar, write_sidecar
 
 
 class _FakeConfig:

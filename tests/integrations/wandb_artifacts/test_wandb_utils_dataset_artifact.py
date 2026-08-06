@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """`WandBLogger.download_dataset_artifact` / `record_dataset_artifact_lineage` are thin, testable
-wrappers around `lerobot.integrations.wandb_artifacts`. Mocked one layer up (at the
-`lerobot.integrations.wandb_artifacts.download_artifact` boundary the logger imports), the same
+wrappers around `lerobot_wandb`. Mocked one layer up (at the
+`lerobot_wandb.download_artifact` boundary the logger imports), the same
 boundary `tests/integrations/wandb_artifacts/test_store.py` mocks the W&B SDK at, so neither the real
 W&B SDK nor a network call is ever exercised here.
 """
@@ -25,8 +25,9 @@ import pytest
 # `validate_dataset_directory` (reached via the logger's lazy import) pulls in `datasets`/`pandas`,
 # so these tests only run once the dataset extra is installed.
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+pytest.importorskip("lerobot_wandb", reason="lerobot_wandb is required (install lerobot[training])")
 
-import lerobot.integrations.wandb_artifacts as wandb_artifacts
+import lerobot_wandb as wandb_artifacts
 from lerobot.common.wandb_utils import WandBLogger
 
 

@@ -14,7 +14,7 @@ loop.
 
 The commands form a tested template. Supply the setup and runtime values explicitly marked in steps
 0, 4, and 6, and adjust the hardware ports and camera index described in step 0.
-`tests/integrations/wandb_artifacts/test_showcase_readme.py` expands the documented values, extracts
+`packages/lerobot-wandb/tests/test_showcase_readme.py` expands the documented values, extracts
 the commands, and parses them against the real CLI. It does not exercise a live W&B workspace or
 robot hardware.
 
@@ -62,6 +62,12 @@ The worked commands target Linux with a Bash-compatible shell. On Windows PowerS
 environment with `.venv\Scripts\Activate.ps1` and replace `/dev/ttyACM*` device paths with the
 corresponding `COM` ports. The remaining CLI arguments are the same.
 
+### 0.1 Fork development environment (this manual's primary path)
+
+The fork's training integration (`lerobot-train --dataset.artifact_ref`, final-model
+publication) requires the fork itself. Its `training` extra installs the companion
+`lerobot-wandb` distribution automatically:
+
 ```bash
 uv sync --locked --extra core_scripts --extra feetech --extra training
 source .venv/bin/activate
@@ -71,9 +77,30 @@ export WANDB_PROJECT="so101-pick-cube"
 ```
 
 `core_scripts` installs the dataset and hardware stacks, `feetech` the SO-101 motor bus, and
-`training` both `wandb` and `accelerate`. The commands below assume an SO-101 follower on
-`/dev/ttyACM0`, a leader on `/dev/ttyACM1`, and an OpenCV camera at index `0`; adjust them to your
-hardware.
+`training` both `wandb` and `accelerate` plus the `lerobot-wandb` companion. The commands below
+assume an SO-101 follower on `/dev/ttyACM0`, a leader on `/dev/ttyACM1`, and an OpenCV camera at
+index `0`; adjust them to your hardware.
+
+### 0.2 Existing LeRobot environment (companion only)
+
+`lerobot-wandb` is an independently installable companion distribution: it coexists with an
+already-installed LeRobot (upstream or compatible fork) without replacing or shadowing it, and
+never installs files into the `lerobot` namespace. Install it into the environment that already
+has LeRobot:
+
+```bash
+pip install lerobot-wandb            # optional: lerobot-wandb[wandb-workspace] for workspace create
+```
+
+This manual's training step (§3) and final-model publication (§7) are fork-specific features and
+need the fork's `training` extra. Dataset/model/rollout Artifact transfer, promotion, and
+workspace creation work against a plain upstream LeRobot install. Commands that need LeRobot
+validate the installed version at startup (supported range: `>=0.6.1,<0.7.0`) and fail with an
+actionable message when it is absent or unsupported (`--allow-unsupported-lerobot` is the
+documented experimental override).
+
+For a fresh environment with no LeRobot yet: `pip install 'lerobot-wandb[lerobot]'` installs a
+compatible LeRobot and the companion in one command.
 
 ## 1. Record a teaching dataset
 
@@ -271,7 +298,7 @@ is project configuration, not a Run: no `wandb.init` happens and nothing is uplo
 The command needs the optional extra:
 
 ```bash
-pip install "lerobot[wandb-workspace]"
+pip install "lerobot-wandb[wandb-workspace]"
 ```
 
 One-time project setup:

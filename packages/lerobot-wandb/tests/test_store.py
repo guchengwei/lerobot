@@ -23,8 +23,8 @@ pytest.importorskip("wandb", reason="wandb is required (install lerobot[training
 
 import wandb
 
-from lerobot.integrations.wandb_artifacts.refs import parse_artifact_ref
-from lerobot.integrations.wandb_artifacts.store import (
+from lerobot_wandb.refs import parse_artifact_ref
+from lerobot_wandb.store import (
     ArtifactTypeMismatchError,
     DownloadDestinationNotEmptyError,
     MaterializedArtifact,

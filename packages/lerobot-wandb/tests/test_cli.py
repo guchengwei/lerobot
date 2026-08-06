@@ -24,13 +24,18 @@ import pytest
 pytest.importorskip("wandb", reason="wandb is required (install lerobot[training])")
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
 
+from typing import Any
+
 from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
+
+pytest.importorskip("lerobot", reason="lerobot is required (install a supported lerobot release)")
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.pyav_utils import get_codec
-from lerobot.integrations.wandb_artifacts import cli, workspace as cli_ws
-from lerobot.integrations.wandb_artifacts.inspect import DatasetDirectoryError, ModelDirectoryError
-from lerobot.integrations.wandb_artifacts.store import ArtifactTypeMismatchError, MaterializedArtifact
+
+from lerobot_wandb import cli, workspace as cli_ws
+from lerobot_wandb.inspect import DatasetDirectoryError, ModelDirectoryError
+from lerobot_wandb.store import ArtifactTypeMismatchError, MaterializedArtifact
 
 require_h264 = pytest.mark.skipif(
     get_codec("h264") is None, reason="'h264' encoder not in local FFmpeg build"
@@ -566,7 +571,7 @@ def test_model_download_leaves_destination_untouched_when_staged_model_is_invali
 def _write_rollout_dataset(root: Path, *, episodes: int, with_video: bool) -> None:
     """A genuinely valid rollout dataset (a rollout is a LeRobotDataset; see ADR 0004)."""
     camera_key = "observation.images.cam"
-    features = {"action": _ACTION_FEATURE}
+    features: dict[str, dict[str, Any]] = {"action": _ACTION_FEATURE}
     if with_video:
         features[camera_key] = {
             "dtype": "video",
@@ -1124,7 +1129,9 @@ def test_workspace_create_reports_what_it_did(monkeypatch, capsys, status):
 
 def test_workspace_create_failures_are_concise_and_nonzero(monkeypatch, capsys):
     def _boom(**kwargs):
-        raise cli_ws.WorkspaceDependencyError("Install it with `pip install 'lerobot[wandb-workspace]'`.")
+        raise cli_ws.WorkspaceDependencyError(
+            "Install it with `pip install 'lerobot-wandb[wandb-workspace]'`."
+        )
 
     monkeypatch.setattr(cli, "create_rollout_workspace", _boom)
 
@@ -1133,7 +1140,7 @@ def test_workspace_create_failures_are_concise_and_nonzero(monkeypatch, capsys):
 
     assert excinfo.value.code == 1
     out = capsys.readouterr().out
-    assert "lerobot[wandb-workspace]" in out
+    assert "lerobot-wandb[wandb-workspace]" in out
 
 
 def test_upload_commands_import_without_wandb_workspaces():
@@ -1144,11 +1151,7 @@ def test_upload_commands_import_without_wandb_workspaces():
     is forced to fail: the CLI must load (it imports the workspace module eagerly)
     without the extra installed.
     """
-    code = (
-        "import sys\n"
-        "sys.modules['wandb_workspaces'] = None\n"
-        "from lerobot.integrations.wandb_artifacts import cli  # noqa: F401\n"
-    )
+    code = "import sys\nsys.modules['wandb_workspaces'] = None\nfrom lerobot_wandb import cli  # noqa: F401\n"
     result = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
@@ -1156,3 +1159,13 @@ def test_upload_commands_import_without_wandb_workspaces():
         cwd=Path(__file__).parents[3],
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_main_reports_missing_lerobot_cleanly(monkeypatch, capsys):
+    """A LeRobot-dependent command without LeRobot installed must exit nonzero with
+    the actionable compatibility message — never an import traceback."""
+    monkeypatch.setattr("lerobot_wandb.compatibility.get_installed_lerobot_version", lambda: None)
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["dataset", "upload", "--root", ".", "--project", "p", "--name", "n"])
+    assert excinfo.value.code == 1
+    assert "not installed" in capsys.readouterr().out

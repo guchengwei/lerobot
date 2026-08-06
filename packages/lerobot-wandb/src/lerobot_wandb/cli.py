@@ -54,8 +54,7 @@ from pathlib import Path
 
 import wandb
 
-from lerobot.utils.utils import init_logging
-
+from .compatibility import LeRobotCompatibilityError, set_allow_unsupported
 from .inspect import (
     inspect_dataset_directory,
     inspect_model_directory,
@@ -358,6 +357,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lerobot-wandb", description="Move LeRobot datasets and models to/from W&B Artifacts."
     )
+    parser.add_argument(
+        "--allow-unsupported-lerobot",
+        action="store_true",
+        help="Experimental: proceed even when the installed LeRobot version is outside the "
+        "supported range. Never substitutes for a missing LeRobot install.",
+    )
     resource_subparsers = parser.add_subparsers(dest="resource", required=True)
 
     dataset_parser = resource_subparsers.add_parser("dataset", help="Upload/download a dataset artifact.")
@@ -473,11 +478,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _init_logging() -> None:
+    """Console logging for the sidecar CLI, using standard-library logging only.
+
+    The companion distribution must not depend on LeRobot's private logging setup:
+    this mirrors its console format without importing from ``lerobot``.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(asctime)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
-    init_logging()
+    _init_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
-    args.func(args)
+    set_allow_unsupported(args.allow_unsupported_lerobot)
+    try:
+        args.func(args)
+    except LeRobotCompatibilityError as error:
+        print(f"Error: {error}")
+        raise SystemExit(1) from error
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@
 """``lerobot-wandb workspace create`` behavior, network-free.
 
 All W&B calls are mocked at the module boundary of
-``lerobot.integrations.wandb_artifacts.workspace``. Template construction is
+``lerobot_wandb.workspace``. Template construction is
 exercised against the real ``wandb_workspaces`` dataclasses, which are pure.
 """
 
@@ -22,12 +22,12 @@ import pytest
 
 pytest.importorskip("wandb", reason="wandb is required (install lerobot[training])")
 pytest.importorskip(
-    "wandb_workspaces", reason="wandb_workspaces is required (install lerobot[wandb-workspace])"
+    "wandb_workspaces", reason="wandb_workspaces is required (install lerobot-wandb[wandb-workspace])"
 )
 
 from wandb_workspaces.reports.v2 import MediaBrowser, ScalarChart, SummaryMetric
 
-from lerobot.integrations.wandb_artifacts import workspace as ws_mod
+from lerobot_wandb import workspace as ws_mod
 
 
 def test_template_is_a_curated_rollout_review_workspace():
@@ -230,7 +230,7 @@ def test_missing_optional_dependency_is_actionable(monkeypatch, fake_ws):
 
     monkeypatch.setattr(ws_mod.importlib, "import_module", _no_workspaces)
 
-    with pytest.raises(ws_mod.WorkspaceDependencyError, match="lerobot\\[wandb-workspace\\]"):
+    with pytest.raises(ws_mod.WorkspaceDependencyError, match=r"lerobot-wandb\[wandb-workspace\]"):
         ws_mod.create_rollout_workspace(entity="my-team", project="my-project")
 
     # The dependency gate fires before any project/network work.

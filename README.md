@@ -31,10 +31,17 @@ This fork adds an optional W&B Artifacts and Registry path for moving finalized 
 policies between a recording machine, a training machine, and a robot machine. The worked example
 keeps W&B outside the robot control loop and uses no Hugging Face Hub storage on that path.
 
+`lerobot-wandb` is an independently installable **companion distribution** (import package
+`lerobot_wandb`) that coexists with an already-installed LeRobot: it never installs files into
+the `lerobot` namespace and never replaces or shadows an existing LeRobot. Its commands validate
+the installed LeRobot at runtime (supported range `>=0.6.1,<0.7.0`) and fail with an actionable
+message when it is absent or unsupported.
+
 > [!IMPORTANT]
-> `pip install lerobot` installs the upstream package and does **not** include this fork's
-> `lerobot-wandb` command. Clone this repository, install its locked environment, and activate it
-> before following the manual:
+> `pip install lerobot` installs the upstream package and does **not** include the `lerobot-wandb`
+> command or this fork's training integration. To use this fork's full workflow — training from an
+> Artifact ref and final-model publication — clone this repository, install its locked environment,
+> and activate it before following the manual:
 
 ```bash
 git clone https://github.com/guchengwei/lerobot.git
@@ -44,10 +51,23 @@ source .venv/bin/activate
 lerobot-wandb --help
 ```
 
+To use the sidecar CLI with an **existing** LeRobot environment (upstream or fork) instead,
+install the companion into that environment without touching LeRobot:
+
+```bash
+pip install lerobot-wandb            # optional: lerobot-wandb[wandb-workspace]
+```
+
 Then follow the **[worked end-to-end W&B manual](./examples/wandb_showcase/README.md)**. It covers
 recording, dataset publication, training from an immutable Artifact version, model download,
 real-robot rollout, rollout publication with lineage, and promotion of the exact evaluated model
 version. Its commands assume the source environment above is active.
+
+The manual distinguishes **portable companion features** — dataset/model/rollout Artifact
+transfer, model promotion, H.264 rollout previews, and workspace creation, which work against a
+plain upstream LeRobot install — from **fork-only training hooks** — `lerobot-train
+--dataset.artifact_ref` and final-model publication from the training lifecycle, which require
+this fork. The companion never patches upstream `lerobot-train` behavior.
 
 The integration's terminology and architectural boundaries are documented in
 [`CONTEXT.md`](./CONTEXT.md).

@@ -23,14 +23,17 @@ pytest.importorskip("av", reason="av is required (install lerobot[dataset])")
 
 import av
 
+pytest.importorskip("lerobot", reason="lerobot is required (install a supported lerobot release)")
+
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.pyav_utils import get_codec
 from lerobot.datasets.video_utils import get_video_info
-from lerobot.integrations.wandb_artifacts.inspect import (
+
+from lerobot_wandb.inspect import (
     DatasetDirectoryMetadata,
     inspect_dataset_directory,
 )
-from lerobot.integrations.wandb_artifacts.rollout import (
+from lerobot_wandb.rollout import (
     RolloutSummary,
     prepare_rollout_preview,
     select_representative_video,

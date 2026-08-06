@@ -13,7 +13,7 @@
 # limitations under the License.
 """`WandBLogger.log_final_model` (issue #5: publish the final trained checkpoint as its own
 versioned W&B Artifact). Mocked one layer up, the same way `test_wandb_utils_dataset_artifact.py`
-mocks it, at the `lerobot.integrations.wandb_artifacts.upload_directory` boundary the logger imports
+mocks it, at the `lerobot_wandb.upload_directory` boundary the logger imports
 — so neither the real W&B SDK nor a network call is ever exercised here. `inspect_model_directory`
 itself is exercised for real: it's local-only file inspection, not a network/SDK call.
 """
@@ -25,10 +25,11 @@ from unittest.mock import MagicMock
 import pytest
 
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+pytest.importorskip("lerobot_wandb", reason="lerobot_wandb is required (install lerobot[training])")
 
 from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 
-import lerobot.integrations.wandb_artifacts as wandb_artifacts
+import lerobot_wandb as wandb_artifacts
 from lerobot.common.wandb_utils import WandBLogger
 from lerobot.configs.default import WandBConfig
 from lerobot.utils.constants import PRETRAINED_MODEL_DIR

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Network-free guard against ``wandb-workspaces`` drifting out from under the workspace
-command (``lerobot.integrations.wandb_artifacts.workspace``) within its pinned version range.
+command (``lerobot_wandb.workspace``) within its pinned version range.
 
 The mocked tests in ``test_workspace.py`` can't detect the real package changing shape; this
 asserts the exact classes/parameters/properties that module calls on still exist. It never
@@ -24,7 +24,7 @@ import inspect
 import pytest
 
 pytest.importorskip(
-    "wandb_workspaces", reason="wandb_workspaces is required (install lerobot[wandb-workspace])"
+    "wandb_workspaces", reason="wandb_workspaces is required (install lerobot-wandb[wandb-workspace])"
 )
 
 import wandb_workspaces.reports.v2 as wr

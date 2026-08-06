@@ -26,10 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from lerobot.configs.video import RGBEncoderConfig
-from lerobot.datasets.io_utils import load_episodes, load_info
-from lerobot.datasets.video_utils import reencode_video
-
+from . import lerobot_adapter as _lerobot
 from .inspect import DatasetDirectoryMetadata
 
 ROLLOUT_ARTIFACT_TYPE = "rollout"
@@ -44,8 +41,8 @@ def prepare_rollout_preview(source: Path, destination: Path) -> Path:
     W&B run. ``destination`` is caller-owned and must live outside the rollout
     root so the preview cannot enter the Artifact manifest.
     """
-    encoder = RGBEncoderConfig(vcodec="h264", pix_fmt="yuv420p")
-    reencode_video(source, destination, video_encoder=encoder, overwrite=True)
+    encoder = _lerobot.RGBEncoderConfig(vcodec="h264", pix_fmt="yuv420p")
+    _lerobot.reencode_video(source, destination, video_encoder=encoder, overwrite=True)
     return destination
 
 
@@ -162,12 +159,12 @@ def select_representative_video(root: Path | str) -> RepresentativeVideo | None:
     proves the metadata read here is consistent with the files on disk.
     """
     root = Path(root)
-    info = load_info(root)
+    info = _lerobot.load_info(root)
     video_keys = sorted(key for key, feature in info.features.items() if feature["dtype"] == "video")
     if not video_keys or info.video_path is None or info.total_episodes == 0:
         return None
 
-    episodes = load_episodes(root)
+    episodes = _lerobot.load_episodes(root)
     located = [
         (
             key,

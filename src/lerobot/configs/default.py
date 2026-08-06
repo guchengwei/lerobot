@@ -81,7 +81,7 @@ class DatasetConfig:
         if self.repo_id or self.artifact_ref is None:
             return self.repo_id
 
-        from lerobot.integrations.wandb_artifacts import parse_artifact_ref
+        from lerobot_wandb import parse_artifact_ref
 
         return parse_artifact_ref(self.artifact_ref).name
 

@@ -41,3 +41,7 @@ _Avoid_: "model registry" (ambiguous between legacy and current)
 **Promotion**:
 Moving an alias onto a model version that already exists, and optionally linking that same version into a Registry collection. Uploads nothing and creates no run, so the promoted version is byte-identical to the one a rollout evaluated — re-uploading a downloaded policy would produce a different version with no edge back to that rollout. Whether to promote is a human judgement made from the run; nothing in this integration computes it.
 _Avoid_: "publishing a model" (conflates promotion with `model upload`, which does log a new version)
+
+**Companion distribution / `lerobot-wandb`**:
+An independently installable wheel (`lerobot_wandb` import package, `lerobot-wandb` console script) in `packages/lerobot-wandb`, owned by this repository but built and installed separately from `lerobot`. It coexists with an installed LeRobot: it never installs files into the `lerobot` namespace and its base dependencies never hard-require `lerobot` — LeRobot-dependent commands validate the installed version at runtime (see `packages/lerobot-wandb/src/lerobot_wandb/compatibility.py`). Dataset/model/rollout Artifact transfer, promotion, H.264 previews, and workspace creation are portable companion features; `lerobot-train --dataset.artifact_ref` and final-model publication are fork-only training hooks.
+_Avoid_: "the plugin" (implies patching upstream `lerobot-train`, which nothing here does).

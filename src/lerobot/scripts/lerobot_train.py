@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from accelerate import Accelerator
 
-    from lerobot.integrations.wandb_artifacts import MaterializedArtifact
+    from lerobot_wandb import MaterializedArtifact
 
 import torch
 from termcolor import colored
@@ -121,8 +121,8 @@ def _materialize_dataset_artifact(
     download_root = cfg.output_dir / "wandb_dataset"
     materialized = None
     if is_main_process:
-        from lerobot.integrations.wandb_artifacts import MaterializedArtifact, validate_dataset_directory
-        from lerobot.integrations.wandb_artifacts.sidecar import ArtifactSidecar, read_sidecar, write_sidecar
+        from lerobot_wandb import MaterializedArtifact, validate_dataset_directory
+        from lerobot_wandb.sidecar import ArtifactSidecar, read_sidecar, write_sidecar
 
         if cfg.resume and download_root.is_dir() and any(download_root.iterdir()):
             # Resuming into the same output_dir: reuse the copy materialized by the original run

@@ -32,6 +32,7 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - "Makefile"
+      - "packages/lerobot-wandb/**"
   push:
     branches:
       - main
@@ -42,6 +43,7 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - "Makefile"
+      - "packages/lerobot-wandb/**"
 
 permissions:
   contents: read
