@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -1132,3 +1134,25 @@ def test_workspace_create_failures_are_concise_and_nonzero(monkeypatch, capsys):
     assert excinfo.value.code == 1
     out = capsys.readouterr().out
     assert "lerobot[wandb-workspace]" in out
+
+
+def test_upload_commands_import_without_wandb_workspaces():
+    """Acceptance criterion: existing upload/download commands keep working when the
+    optional workspace extra is not installed.
+
+    Proved structurally in a clean interpreter where importing ``wandb_workspaces``
+    is forced to fail: the CLI must load (it imports the workspace module eagerly)
+    without the extra installed.
+    """
+    code = (
+        "import sys\n"
+        "sys.modules['wandb_workspaces'] = None\n"
+        "from lerobot.integrations.wandb_artifacts import cli  # noqa: F401\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).parents[3],
+    )
+    assert result.returncode == 0, result.stderr

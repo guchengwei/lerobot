@@ -257,9 +257,10 @@ lerobot-wandb workspace create \
   --project "$WANDB_PROJECT"
 ```
 
-実行すると Workspace URL が表示されます。再実行しても安全です。既存の Workspace を複製せず再利用し、
-他の Workspace には一切触れません。upload が Workspace を作成・変更することもありません。この 2 つは
-独立しています。
+実行すると Workspace URL が表示されます。再実行しても安全です。このコマンドが作成した Workspace は
+複製されず再利用され、他の Workspace には一切触れません(UI で同名の Workspace を手動作成していた
+場合は採用されません。このコマンドは自分が作成したものだけを認識します)。upload が Workspace を
+作成・変更することもありません。この 2 つは独立しています。
 
 `--replace` は名前指定の Workspace だけを決定的な LeRobot template で更新します。例えば upgrade で
 panel 構成が変わった後に使用します:

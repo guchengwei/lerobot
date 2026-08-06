@@ -30,6 +30,7 @@ pytest.importorskip(
 import wandb_workspaces.reports.v2 as wr
 import wandb_workspaces.workspaces as ws
 from wandb_workspaces import _graphql
+from wandb_workspaces.reports.v2.interface import _metric_to_backend
 
 
 def _params(callable_obj) -> set[str]:
@@ -65,6 +66,13 @@ def test_media_browser_accepts_expected_params():
 def test_scalar_chart_accepts_expected_params():
     params = _params(wr.ScalarChart)
     assert {"metric", "title"} <= params
+
+
+def test_summary_metric_serializes_to_summary_metrics():
+    # The template binds rollout-fact charts to SummaryMetric because the upload path
+    # writes them to run.summary only; a bare string would bind to history.
+    assert _params(wr.SummaryMetric) >= {"name"}
+    assert _metric_to_backend(wr.SummaryMetric("success_rate")) == "summary_metrics.success_rate"
 
 
 def test_runset_settings_accepts_expected_params():

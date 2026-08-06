@@ -25,7 +25,7 @@ pytest.importorskip(
     "wandb_workspaces", reason="wandb_workspaces is required (install lerobot[wandb-workspace])"
 )
 
-from wandb_workspaces.reports.v2 import MediaBrowser, ScalarChart
+from wandb_workspaces.reports.v2 import MediaBrowser, ScalarChart, SummaryMetric
 
 from lerobot.integrations.wandb_artifacts import workspace as ws_mod
 
@@ -43,6 +43,7 @@ def test_template_is_a_curated_rollout_review_workspace():
     section = template.sections[0]
     assert section.name == "Rollout Review"
     assert section.is_open is True
+    assert section.pinned is True
 
     # The gallery is bound to the browser-playable preview media key from the
     # rollout upload, never to an invented key.
@@ -53,8 +54,14 @@ def test_template_is_a_curated_rollout_review_workspace():
     assert media_panels[0].gallery_axis == "run"
 
     # Every scalar panel is bound to a key that `RolloutSummary.to_wandb_metadata()`
-    # already logs — the exact names, not renames.
-    scalar_panels = {(p.title, p.metric) for p in section.panels if isinstance(p, ScalarChart)}
+    # already logs — the exact names, not renames — and as a SummaryMetric: the upload
+    # path writes these facts to run.summary only, so a bare history metric would
+    # render an empty chart.
+    scalar_panels = {
+        (p.title, p.metric.name)
+        for p in section.panels
+        if isinstance(p, ScalarChart) and isinstance(p.metric, SummaryMetric)
+    }
     assert scalar_panels == {
         ("Success rate", "success_rate"),
         ("Episodes", "episodes"),
@@ -62,6 +69,7 @@ def test_template_is_a_curated_rollout_review_workspace():
         ("Frames", "frames"),
         ("Duration", "duration_s"),
     }
+    assert sum(isinstance(p, ScalarChart) for p in section.panels) == len(scalar_panels)
 
     # The runset is scoped to rollout-upload runs, and the runs table exposes the
     # requested/resolved model refs plus the headline rollout facts as columns.

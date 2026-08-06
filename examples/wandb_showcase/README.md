@@ -282,9 +282,10 @@ lerobot-wandb workspace create \
   --project "$WANDB_PROJECT"
 ```
 
-The command prints the Workspace URL. Re-running it is safe: it reuses the existing workspace
-instead of duplicating it, and never touches any other workspace. Uploads never create or modify a
-workspace — the two are independent.
+The command prints the Workspace URL. Re-running it is safe: a Workspace this command created
+is reused instead of duplicated, and other Workspaces are never touched. (A Workspace you built
+manually in the UI under the same name is not adopted — the command only recognizes its own.)
+Uploads never create or modify a workspace — the two are independent.
 
 `--replace` refreshes only the named workspace with the deterministic LeRobot template, for example
 after an upgrade changed the panel set:

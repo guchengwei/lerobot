@@ -116,6 +116,7 @@ def _build_rollout_workspace(entity: str, project: str, name: str) -> Any:
             ws.Section(
                 name=_SECTION_NAME,
                 is_open=True,
+                pinned=True,
                 panels=[
                     wr.MediaBrowser(
                         title="Rollout videos",
@@ -123,11 +124,14 @@ def _build_rollout_workspace(entity: str, project: str, name: str) -> Any:
                         mode="gallery",
                         gallery_axis="run",
                     ),
-                    wr.ScalarChart(title="Success rate", metric="success_rate"),
-                    wr.ScalarChart(title="Episodes", metric="episodes"),
-                    wr.ScalarChart(title="Successes", metric="successes"),
-                    wr.ScalarChart(title="Frames", metric="frames"),
-                    wr.ScalarChart(title="Duration", metric="duration_s"),
+                    # The rollout facts live in the run summary (run.summary.update in the
+                    # upload path), so the charts must bind to SummaryMetric — a bare string
+                    # would bind to history and render empty.
+                    wr.ScalarChart(title="Success rate", metric=wr.SummaryMetric("success_rate")),
+                    wr.ScalarChart(title="Episodes", metric=wr.SummaryMetric("episodes")),
+                    wr.ScalarChart(title="Successes", metric=wr.SummaryMetric("successes")),
+                    wr.ScalarChart(title="Frames", metric=wr.SummaryMetric("frames")),
+                    wr.ScalarChart(title="Duration", metric=wr.SummaryMetric("duration_s")),
                 ],
             ),
         ],
