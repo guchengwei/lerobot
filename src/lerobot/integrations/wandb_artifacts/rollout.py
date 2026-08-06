@@ -26,11 +26,27 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from lerobot.configs.video import RGBEncoderConfig
 from lerobot.datasets.io_utils import load_episodes, load_info
+from lerobot.datasets.video_utils import reencode_video
 
 from .inspect import DatasetDirectoryMetadata
 
 ROLLOUT_ARTIFACT_TYPE = "rollout"
+
+
+def prepare_rollout_preview(source: Path, destination: Path) -> Path:
+    """Transcode one rollout video into a browser-compatible H.264/yuv420p preview.
+
+    A display derivative only: the original file stays in the rollout Artifact
+    unchanged. Failures propagate from ``reencode_video`` (e.g. missing ``h264``
+    encoder, unreadable source) so the caller can surface them before creating a
+    W&B run. ``destination`` is caller-owned and must live outside the rollout
+    root so the preview cannot enter the Artifact manifest.
+    """
+    encoder = RGBEncoderConfig(vcodec="h264", pix_fmt="yuv420p")
+    reencode_video(source, destination, video_encoder=encoder, overwrite=True)
+    return destination
 
 
 def validate_success_count(successes: int, episodes: int) -> None:

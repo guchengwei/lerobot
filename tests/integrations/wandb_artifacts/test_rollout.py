@@ -19,16 +19,26 @@ import numpy as np
 import pytest
 
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+pytest.importorskip("av", reason="av is required (install lerobot[dataset])")
+
+import av
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.pyav_utils import get_codec
+from lerobot.datasets.video_utils import get_video_info
 from lerobot.integrations.wandb_artifacts.inspect import (
     DatasetDirectoryMetadata,
     inspect_dataset_directory,
 )
 from lerobot.integrations.wandb_artifacts.rollout import (
     RolloutSummary,
+    prepare_rollout_preview,
     select_representative_video,
     validate_success_count,
+)
+
+require_h264 = pytest.mark.skipif(
+    get_codec("h264") is None, reason="'h264' encoder not in local FFmpeg build"
 )
 
 _ACTION_FEATURE = {"dtype": "float32", "shape": (2,), "names": None}
@@ -153,3 +163,68 @@ def test_no_video_in_a_state_only_rollout(tmp_path):
     assert select_representative_video(root) is None
     # The directory is still a perfectly valid rollout dataset.
     assert inspect_dataset_directory(root).total_episodes == 2
+
+
+@require_h264
+def test_prepare_rollout_preview_transcodes_av1_to_h264_yuv420p(tmp_path):
+    root = tmp_path / "rollout"
+    _write_rollout_dataset(root, episodes=1, camera_keys=("observation.images.cam",))
+
+    source = sorted(root.rglob("*.mp4"))[0]
+    destination = tmp_path / "previews" / "preview.mp4"
+
+    assert get_video_info(source)["video.codec"] == "av1"  # a real transcode, not a no-op
+
+    prepare_rollout_preview(source, destination)
+
+    info = get_video_info(destination)
+    assert info["video.codec"] == "h264"
+    assert info["video.pix_fmt"] == "yuv420p"
+    assert info["video.height"] == get_video_info(source)["video.height"]
+    assert info["video.width"] == get_video_info(source)["video.width"]
+    assert info["video.fps"] == get_video_info(source)["video.fps"]
+
+
+@require_h264
+def test_prepare_rollout_preview_leaves_source_unchanged(tmp_path):
+    root = tmp_path / "rollout"
+    _write_rollout_dataset(root, episodes=1, camera_keys=("observation.images.cam",))
+
+    source = sorted(root.rglob("*.mp4"))[0]
+    destination = tmp_path / "previews" / "preview.mp4"
+
+    before = source.read_bytes()
+    stat_before = source.stat()
+
+    prepare_rollout_preview(source, destination)
+
+    assert destination != source
+    assert destination.exists()
+    assert source.read_bytes() == before
+    stat_after = source.stat()
+    assert stat_after.st_size == stat_before.st_size
+    assert stat_after.st_mtime_ns == stat_before.st_mtime_ns
+
+
+@require_h264
+def test_prepare_rollout_preview_writes_outside_rollout_root(tmp_path):
+    root = tmp_path / "rollout"
+    _write_rollout_dataset(root, episodes=1, camera_keys=("observation.images.cam",))
+
+    source = sorted(root.rglob("*.mp4"))[0]
+    destination = tmp_path / "previews" / "preview.mp4"
+
+    prepare_rollout_preview(source, destination)
+
+    # The preview is caller-owned; it cannot enter the Artifact manifest with the rollout root.
+    assert root not in destination.parents
+
+
+@require_h264
+def test_prepare_rollout_preview_propagates_failure(tmp_path):
+    """A missing source fails before any W&B run could exist; the caller sees a clear exception.
+
+    Requires h264: without it, the encoder config raises before the missing source is ever opened.
+    """
+    with pytest.raises(av.error.FileNotFoundError):
+        prepare_rollout_preview(tmp_path / "missing.mp4", tmp_path / "out.mp4")
