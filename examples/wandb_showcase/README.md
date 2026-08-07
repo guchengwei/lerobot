@@ -89,8 +89,12 @@ never installs files into the `lerobot` namespace. Install it into the environme
 has LeRobot:
 
 ```bash
-pip install lerobot-wandb            # optional: lerobot-wandb[wandb-workspace] for workspace create
+pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
+# optional: append [wandb-workspace] (e.g. lerobot-wandb[wandb-workspace] @ git+...) for workspace create
 ```
+
+The distribution is not yet published to PyPI; the install command shortens to `pip install
+lerobot-wandb` once it is.
 
 This manual's training step (§3) and final-model publication (§7) are fork-specific features and
 need the fork's `training` extra. Dataset/model/rollout Artifact transfer, promotion, and

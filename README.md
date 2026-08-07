@@ -55,8 +55,12 @@ To use the sidecar CLI with an **existing** LeRobot environment (upstream or for
 install the companion into that environment without touching LeRobot:
 
 ```bash
-pip install lerobot-wandb            # optional: lerobot-wandb[wandb-workspace]
+pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
+# optional: append [wandb-workspace] (e.g. lerobot-wandb[wandb-workspace] @ git+...) for workspace create
 ```
+
+The distribution is not yet published to PyPI; the install command shortens to `pip install
+lerobot-wandb` once it is.
 
 Then follow the **[worked end-to-end W&B manual](./examples/wandb_showcase/README.md)**. It covers
 recording, dataset publication, training from an immutable Artifact version, model download,

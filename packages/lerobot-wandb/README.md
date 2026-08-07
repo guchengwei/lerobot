@@ -5,9 +5,16 @@ W&B Artifacts. Installs side-by-side with an existing `lerobot` environment with
 replacing or shadowing it.
 
 ```bash
-pip install lerobot-wandb            # into an existing LeRobot environment
-pip install 'lerobot-wandb[lerobot]' # fresh environment: also installs a compatible LeRobot
+# Install from this repository (the distribution is not yet published to PyPI):
+pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
+
+# Fresh environment: also installs a compatible LeRobot:
+pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
 ```
+
+Once the distribution is published to PyPI (see the pending publishing tickets), the
+install command shortens to `pip install lerobot-wandb` (or `pip install 'lerobot-wandb[lerobot]'`
+for a fresh environment).
 
 `lerobot-wandb` never installs files into the `lerobot` package namespace, and the
 base distribution does not hard-depend on `lerobot`: commands that need LeRobot
