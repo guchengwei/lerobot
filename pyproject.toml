@@ -295,6 +295,9 @@ all = [
     "lerobot[training]",
     "lerobot[hardware]",
     "lerobot[viz]",
+    # Workspace command support (`lerobot-wandb workspace create`). The companion owns
+    # the `wandb-workspaces` dependency; `training` pulls the companion without it.
+    "lerobot-wandb[wandb-workspace]",
     # NOTE(resolver hint): scipy is pulled in transitively via lerobot[scipy-dep] through
     # multiple extras (aloha, metaworld, pi, wallx, phone). Listing it explicitly
     # helps pip's resolver converge by constraining scipy early, before it encounters

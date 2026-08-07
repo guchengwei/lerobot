@@ -39,6 +39,11 @@ dependencies = [
     "datasets>=4.7.0,<5.0.0",
     "pandas>=2.0.0,<3.0.0",
     "pyarrow>=21.0.0,<30.0.0",
+    # Runtime requirement of the dataset-inspection and H.264 preview paths, which import
+    # LeRobot's video utilities (`lerobot.datasets.video_utils` does `import av` at module
+    # top). LeRobot itself only pulls `av` via its `dataset` extra, so the companion must
+    # declare it to stay portable across supported LeRobot environments.
+    "av>=15.0.0,<16.0.0",
 ]
 
 [project.optional-dependencies]
