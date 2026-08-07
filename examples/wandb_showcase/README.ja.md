@@ -80,8 +80,12 @@ hardware に合わせて変更してください。
 LeRobot が導入済みの environment に、そのまま追加で導入します。
 
 ```bash
-pip install lerobot-wandb            # optional: lerobot-wandb[wandb-workspace] for workspace create
+pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
+# optional: append [wandb-workspace] (e.g. lerobot-wandb[wandb-workspace] @ git+...) for workspace create
 ```
+
+この distribution はまだ PyPI に公開されていません。公開された後の install は `pip install
+lerobot-wandb` に短縮されます。
 
 この manual の training（§3）と final model publication（§7）は fork 専用機能です。dataset/model/
 rollout Artifact の transfer、promotion、workspace creation は plain upstream LeRobot でも動作します。
@@ -89,7 +93,7 @@ LeRobot が必要な command は起動時に導入 version を検証し（対応
 LeRobot が無い・非対応の場合は actionable message で失敗します（`--allow-unsupported-lerobot` が
 実験的な override です）。
 
-LeRobot がまだ無い environment の場合は、`pip install 'lerobot-wandb[lerobot]'` で互換な LeRobot と
+LeRobot がまだ無い environment の場合は、`pip install 'lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb'` で互換な LeRobot と
 companion をまとめて導入できます。
 
 ## 1. Teaching dataset を記録する
