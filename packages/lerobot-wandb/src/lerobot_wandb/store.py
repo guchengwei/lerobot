@@ -21,6 +21,7 @@ when an upload or download is actually attempted.
 
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import tempfile
@@ -33,14 +34,22 @@ from typing import TYPE_CHECKING, Any
 from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 from packaging.version import Version
 
-from lerobot.utils.import_utils import require_package
-
 from .refs import ArtifactRef, parse_artifact_ref
 
 if TYPE_CHECKING:
     import wandb
 
 MODEL_ARTIFACT_TYPE = "model"
+
+
+def _require_package(package: str, *, install_hint: str) -> None:
+    """Raise an actionable error when ``package`` is not importable."""
+    try:
+        importlib.import_module(package)
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            f"{package} is required but not installed. Install it with: {install_hint}"
+        ) from e
 
 
 class ArtifactTypeMismatchError(ValueError):
@@ -84,7 +93,7 @@ class MaterializedArtifact:
 
 def _wandb_sdk() -> Any:
     """Return a supported W&B SDK, raising only when an SDK operation is requested."""
-    require_package("wandb", extra="training")
+    _require_package("wandb", install_hint="pip install lerobot-wandb")
 
     import wandb
 

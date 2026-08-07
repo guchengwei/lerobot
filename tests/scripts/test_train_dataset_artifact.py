@@ -36,10 +36,10 @@ pytest.importorskip("accelerate", reason="accelerate is required (install lerobo
 import lerobot.scripts.lerobot_train as train_module  # noqa: E402
 from lerobot.configs.train import TrainPipelineConfig  # noqa: E402
 from lerobot.datasets.lerobot_dataset import LeRobotDataset  # noqa: E402
-from lerobot.integrations.wandb_artifacts import MaterializedArtifact  # noqa: E402
 from lerobot.policies.act.configuration_act import (
     ACTConfig,  # noqa: E402, F401  (registers --policy.type act)
 )
+from lerobot_wandb import MaterializedArtifact  # noqa: E402
 
 _ACTION_FEATURE = {"dtype": "float32", "shape": (6,), "names": None}
 
@@ -166,7 +166,7 @@ def test_materialize_dataset_artifact_resume_reuses_matching_sidecar_with_no_wan
     materialized copy and takes `resolved_ref`/`digest` straight from the sidecar: no W&B call (no
     re-resolving a possibly-moved alias) is needed to verify or restore lineage.
     """
-    from lerobot.integrations.wandb_artifacts.sidecar import ArtifactSidecar, write_sidecar
+    from lerobot_wandb.sidecar import ArtifactSidecar, write_sidecar
 
     output_dir = tmp_path / "run"
     download_root = output_dir / "wandb_dataset"
@@ -201,7 +201,7 @@ def test_materialize_dataset_artifact_resume_fails_fast_on_sidecar_mismatch(tmp_
     `--dataset.artifact_ref` or `--output_dir` changed between runs): refuse to train on the stale
     copy instead of silently reusing unrelated data.
     """
-    from lerobot.integrations.wandb_artifacts.sidecar import ArtifactSidecar, write_sidecar
+    from lerobot_wandb.sidecar import ArtifactSidecar, write_sidecar
 
     output_dir = tmp_path / "run"
     download_root = output_dir / "wandb_dataset"

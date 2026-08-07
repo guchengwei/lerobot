@@ -29,7 +29,7 @@ import pytest
 
 pytest.importorskip("wandb", reason="wandb is required (install lerobot[training])")
 
-from lerobot.integrations.wandb_artifacts import cli
+from lerobot_wandb import cli
 
 REPO_ROOT = Path(__file__).parents[3]
 README = REPO_ROOT / "examples" / "wandb_showcase" / "README.md"
@@ -141,7 +141,6 @@ def test_readme_train_command_parses_and_validates(tmp_path):
     """
     pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
     import draccus
-
     from lerobot.configs.train import TrainPipelineConfig
     from lerobot.policies.act.configuration_act import ACTConfig  # noqa: F401  (registers act)
 
@@ -182,7 +181,6 @@ def test_readme_record_command_parses():
     """
     pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
     import draccus
-
     from lerobot.scripts.lerobot_record import RecordConfig
 
     cfg = draccus.parse(RecordConfig, args=_readme_command_for("lerobot-record"))

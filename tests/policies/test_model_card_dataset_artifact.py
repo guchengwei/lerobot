@@ -23,9 +23,10 @@ this module must not require them either.
 import re
 from pathlib import Path
 
+import pytest
+
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.integrations.wandb_artifacts.sidecar import ArtifactSidecar, write_sidecar
 from lerobot.policies.pretrained import PreTrainedPolicy
 
 
@@ -98,6 +99,9 @@ def test_artifact_backed_model_card_omits_datasets_and_names_the_artifact_ref(tm
     """`dataset.artifact_ref` set: no `datasets=` claim, and the resolved (immutable) ref from the
     materialized directory's sidecar is named in the card body instead of the derived collection name.
     """
+    pytest.importorskip("lerobot_wandb", reason="lerobot_wandb is required (install lerobot[training])")
+    from lerobot_wandb.sidecar import ArtifactSidecar, write_sidecar
+
     write_sidecar(
         tmp_path,
         ArtifactSidecar(

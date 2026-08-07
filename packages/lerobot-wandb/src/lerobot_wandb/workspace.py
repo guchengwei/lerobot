@@ -40,7 +40,7 @@ ROLLOUT_JOB_TYPE_FILTER = "JobType = 'rollout_upload'"
 _SECTION_NAME = "Rollout Review"
 _INTERNAL_NAME_PREFIX = "nw-"
 _INTERNAL_NAME_SUFFIX = "-v"
-_INSTALL_HINT = 'pip install "lerobot[wandb-workspace]"'
+_INSTALL_HINT = "pip install 'lerobot-wandb[wandb-workspace]'"
 
 
 class WorkspaceDependencyError(RuntimeError):
@@ -194,6 +194,7 @@ def create_rollout_workspace(
     workspace = _build_rollout_workspace(entity, project, name)
     existing = _lookup_workspace(entity, project, name)
 
+    status: Literal["created", "reused", "replaced"]
     if existing is None:
         # A deterministic internal name is the handle re-runs look up (see module docstring).
         workspace._internal_name = _internal_name(name)  # noqa: SLF001

@@ -117,9 +117,10 @@ training = [
     "lerobot[dataset]",
     "wandb>=0.24.1,<0.28.0",
     "lerobot[accelerate-dep]",
+    "lerobot-wandb",
 ]
-# `lerobot-wandb workspace create` only; never required by Artifact upload/download commands.
-wandb-workspace = ["wandb-workspaces>=0.4.0,<0.5.0"]
+# NOTE: the workspace feature's `wandb-workspaces` dependency is owned by the companion
+# distribution (`lerobot-wandb[wandb-workspace]`), never by this one.
 hardware = [
     "lerobot[pynput-dep]",
     "lerobot[pyserial-dep]",
@@ -292,9 +293,11 @@ all = [
     # Feature-scoped extras
     "lerobot[dataset]",
     "lerobot[training]",
-    "lerobot[wandb-workspace]",
     "lerobot[hardware]",
     "lerobot[viz]",
+    # Workspace command support (`lerobot-wandb workspace create`). The companion owns
+    # the `wandb-workspaces` dependency; `training` pulls the companion without it.
+    "lerobot-wandb[wandb-workspace]",
     # NOTE(resolver hint): scipy is pulled in transitively via lerobot[scipy-dep] through
     # multiple extras (aloha, metaworld, pi, wallx, phone). Listing it explicitly
     # helps pip's resolver converge by constraining scipy early, before it encounters
@@ -360,7 +363,9 @@ lerobot-edit-dataset="lerobot.scripts.lerobot_edit_dataset:main"
 lerobot-setup-can="lerobot.scripts.lerobot_setup_can:main"
 lerobot-annotate="lerobot.scripts.lerobot_annotate:main"
 lerobot-rollout="lerobot.scripts.lerobot_rollout:main"
-lerobot-wandb="lerobot.integrations.wandb_artifacts.cli:main"
+
+# NOTE: the `lerobot-wandb` console script is owned by the companion distribution
+# (packages/lerobot-wandb), never by this one.
 
 # ---------------- Tool Configurations ----------------
 
@@ -376,6 +381,9 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
 torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+# In-repo companion distribution (see packages/lerobot-wandb). Editable so fork
+# development sees companion changes immediately.
+lerobot-wandb = { path = "packages/lerobot-wandb", editable = true }
 
 [tool.setuptools.package-data]
 lerobot = ["envs/*.json", "annotations/steerable_pipeline/prompts/*.txt"]
@@ -419,7 +427,7 @@ ignore = [
 "src/lerobot/scripts/convert_dataset_v21_to_v30.py" = ["E402"]
 [tool.ruff.lint.isort]
 combine-as-imports = true
-known-first-party = ["lerobot"]
+known-first-party = ["lerobot", "lerobot_wandb"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -492,6 +500,12 @@ follow_imports = "skip"
 
 [[tool.mypy.overrides]]
 module = "lerobot.*"
+ignore_errors = true
+
+# The companion distribution follows the same gradual policy as lerobot.*: strictness
+# is opted in per module, not enforced from the start. See packages/lerobot-wandb/pyproject.toml.
+[[tool.mypy.overrides]]
+module = "lerobot_wandb.*"
 ignore_errors = true
 
 [[tool.mypy.overrides]]

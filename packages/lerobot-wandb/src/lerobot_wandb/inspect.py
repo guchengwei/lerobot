@@ -23,31 +23,20 @@ from __future__ import annotations
 import json
 import logging
 import math
-import shutil
-import subprocess
 from dataclasses import dataclass
 from numbers import Integral
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import datasets
 import pandas as pd
 import pyarrow.parquet as pq
 from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
 
-from lerobot.datasets.dataset_metadata import CODEBASE_VERSION
-from lerobot.datasets.feature_utils import get_hf_features_from_features
-from lerobot.datasets.io_utils import load_episodes, load_info, load_nested_dataset, load_stats, load_tasks
-from lerobot.datasets.utils import (
-    DATA_DIR,
-    DEFAULT_TASKS_PATH,
-    EPISODES_DIR,
-    INFO_PATH,
-    STATS_PATH,
-    DatasetInfo,
-    check_version_compatibility,
-)
-from lerobot.utils.constants import DEFAULT_FEATURES
+from . import lerobot_adapter as _lerobot
+
+if TYPE_CHECKING:
+    from lerobot.datasets.utils import DatasetInfo
 
 _TIMESTAMP_TOLERANCE_S = 1e-4
 
@@ -97,9 +86,9 @@ def validate_dataset_directory(root: Path | str) -> DatasetInfo:
     if not root.is_dir():
         raise DatasetDirectoryError(f"{root} is not a directory.")
 
-    missing = [path for path in (INFO_PATH, STATS_PATH) if not (root / path).is_file()]
-    if not (root / DATA_DIR).is_dir():
-        missing.append(f"{DATA_DIR}/")
+    missing = [path for path in (_lerobot.INFO_PATH, _lerobot.STATS_PATH) if not (root / path).is_file()]
+    if not (root / _lerobot.DATA_DIR).is_dir():
+        missing.append(f"{_lerobot.DATA_DIR}/")
     if missing:
         raise DatasetDirectoryError(
             f"{root} is missing required dataset file(s)/directory(ies): {', '.join(missing)}."
@@ -131,7 +120,7 @@ def inspect_dataset_directory(root: Path | str) -> DatasetDirectoryMetadata:
         total_tasks=info.total_tasks,
         camera_keys=camera_keys,
         video_keys=video_keys,
-        git_commit=_current_git_commit(),
+        git_commit=_lerobot.lerobot_git_commit(),
     )
 
 
@@ -286,7 +275,7 @@ def inspect_model_directory(root: Path | str) -> ModelDirectoryMetadata:
         has_full_weights=has_full_weights,
         has_adapter_weights=has_adapter_weights,
         policy_type=policy_type if isinstance(policy_type, str) else None,
-        git_commit=_current_git_commit(),
+        git_commit=_lerobot.lerobot_git_commit(),
         is_self_contained=is_self_contained,
         base_model_name_or_path=base_model_name_or_path,
     )
@@ -311,20 +300,20 @@ def _adapter_base_model_name(root: Path) -> str | None:
 
 def _read_info(root: Path) -> DatasetInfo:
     try:
-        info = load_info(root)
-        check_version_compatibility(str(root), info.codebase_version, CODEBASE_VERSION)
+        info = _lerobot.load_info(root)
+        _lerobot.check_version_compatibility(str(root), info.codebase_version, _lerobot.codebase_version())
     except Exception as e:
         raise DatasetDirectoryError(
-            f"{root}/{INFO_PATH} could not be read as compatible dataset info: {e}"
+            f"{root}/{_lerobot.INFO_PATH} could not be read as compatible dataset info: {e}"
         ) from e
     return info
 
 
 def _frame_features(root: Path, info: DatasetInfo) -> datasets.Features:
-    missing = sorted(set(DEFAULT_FEATURES) - set(info.features))
+    missing = sorted(set(_lerobot.DEFAULT_FEATURES) - set(info.features))
     incompatible = [
         key
-        for key, expected in DEFAULT_FEATURES.items()
+        for key, expected in _lerobot.DEFAULT_FEATURES.items()
         if key in info.features
         and (
             info.features[key].get("dtype") != expected["dtype"]
@@ -338,20 +327,24 @@ def _frame_features(root: Path, info: DatasetInfo) -> datasets.Features:
         if incompatible:
             details.append(f"incompatible {sorted(incompatible)}")
         raise DatasetDirectoryError(
-            f"{root}/{INFO_PATH} has invalid required frame features: {', '.join(details)}."
+            f"{root}/{_lerobot.INFO_PATH} has invalid required frame features: {', '.join(details)}."
         )
     try:
-        return get_hf_features_from_features(info.features)
+        return _lerobot.get_hf_features_from_features(info.features)
     except Exception as e:
-        raise DatasetDirectoryError(f"{root}/{INFO_PATH} contains an invalid frame schema: {e}") from e
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} contains an invalid frame schema: {e}"
+        ) from e
 
 
 def _read_stats(root: Path) -> None:
     try:
-        if load_stats(root) is None:
-            raise FileNotFoundError(STATS_PATH)
+        if _lerobot.load_stats(root) is None:
+            raise FileNotFoundError(_lerobot.STATS_PATH)
     except Exception as e:
-        raise DatasetDirectoryError(f"{root}/{STATS_PATH} could not be read as dataset stats: {e}") from e
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.STATS_PATH} could not be read as dataset stats: {e}"
+        ) from e
 
 
 def _read_tasks(root: Path, info: DatasetInfo) -> pd.DataFrame | None:
@@ -360,22 +353,24 @@ def _read_tasks(root: Path, info: DatasetInfo) -> pd.DataFrame | None:
     if info.total_tasks == 0:
         return None
     try:
-        tasks = load_tasks(root)
+        tasks = _lerobot.load_tasks(root)
     except Exception as e:
         raise DatasetDirectoryError(
-            f"{root}/{DEFAULT_TASKS_PATH} could not be read as task metadata: {e}"
+            f"{root}/{_lerobot.DEFAULT_TASKS_PATH} could not be read as task metadata: {e}"
         ) from e
     if len(tasks) != info.total_tasks or not tasks.index.is_unique or "task_index" not in tasks:
         raise DatasetDirectoryError(
-            f"{root}/{DEFAULT_TASKS_PATH} does not describe exactly {info.total_tasks} unique tasks."
+            f"{root}/{_lerobot.DEFAULT_TASKS_PATH} does not describe exactly {info.total_tasks} unique tasks."
         )
     try:
         indices = [int(value) for value in tasks["task_index"].tolist()]
     except (TypeError, ValueError) as e:
-        raise DatasetDirectoryError(f"{root}/{DEFAULT_TASKS_PATH} has invalid task_index values: {e}") from e
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.DEFAULT_TASKS_PATH} has invalid task_index values: {e}"
+        ) from e
     if indices != list(range(info.total_tasks)):
         raise DatasetDirectoryError(
-            f"{root}/{DEFAULT_TASKS_PATH} task_index values must be ordered from 0 to {info.total_tasks - 1}."
+            f"{root}/{_lerobot.DEFAULT_TASKS_PATH} task_index values must be ordered from 0 to {info.total_tasks - 1}."
         )
     return tasks
 
@@ -388,10 +383,10 @@ def _read_episodes(root: Path, info: DatasetInfo) -> datasets.Dataset | None:
             )
         return None
     try:
-        episodes = load_episodes(root)
+        episodes = _lerobot.load_episodes(root)
     except Exception as e:
         raise DatasetDirectoryError(
-            f"{root}/{EPISODES_DIR} could not be read as episode metadata: {e}"
+            f"{root}/{_lerobot.EPISODES_DIR} could not be read as episode metadata: {e}"
         ) from e
 
     required = {
@@ -412,12 +407,12 @@ def _read_episodes(root: Path, info: DatasetInfo) -> datasets.Dataset | None:
     missing = sorted(required - set(episodes.column_names))
     if missing:
         raise DatasetDirectoryError(
-            f"{root}/{EPISODES_DIR} is missing required column(s): {', '.join(missing)}."
+            f"{root}/{_lerobot.EPISODES_DIR} is missing required column(s): {', '.join(missing)}."
         )
-    indices = _integer_values(episodes["episode_index"], f"{root}/{EPISODES_DIR} episode_index")
+    indices = _integer_values(episodes["episode_index"], f"{root}/{_lerobot.EPISODES_DIR} episode_index")
     if len(episodes) != info.total_episodes or indices != list(range(info.total_episodes)):
         raise DatasetDirectoryError(
-            f"{root}/{EPISODES_DIR} must contain {info.total_episodes} rows ordered by episode_index."
+            f"{root}/{_lerobot.EPISODES_DIR} must contain {info.total_episodes} rows ordered by episode_index."
         )
     return episodes
 
@@ -427,14 +422,18 @@ def _validate_payloads(root: Path, info: DatasetInfo, episodes: datasets.Dataset
         return
     video_keys = _video_keys(info)
     if video_keys and info.video_path is None:
-        raise DatasetDirectoryError(f"{root}/{INFO_PATH} declares videos without a video_path template.")
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} declares videos without a video_path template."
+        )
 
     referenced_data: set[Path] = set()
     referenced_videos: set[Path] = set()
     for episode_index, row in enumerate(episodes):
         length = _row_int(root, row, "length", episode_index)
         if length <= 0:
-            raise DatasetDirectoryError(f"{root}/{EPISODES_DIR} episode {episode_index} has length={length}.")
+            raise DatasetDirectoryError(
+                f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has length={length}."
+            )
 
         data_path = _safe_path(
             root,
@@ -443,9 +442,13 @@ def _validate_payloads(root: Path, info: DatasetInfo, episodes: datasets.Dataset
             chunk_index=_row_int(root, row, "data/chunk_index", episode_index),
             file_index=_row_int(root, row, "data/file_index", episode_index),
         )
-        if len(data_path.parts) != 3 or data_path.parts[0] != DATA_DIR or data_path.suffix != ".parquet":
+        if (
+            len(data_path.parts) != 3
+            or data_path.parts[0] != _lerobot.DATA_DIR
+            or data_path.suffix != ".parquet"
+        ):
             raise DatasetDirectoryError(
-                f"{root}/{INFO_PATH} data_path resolves outside the reader's {DATA_DIR}/*/*.parquet layout."
+                f"{root}/{_lerobot.INFO_PATH} data_path resolves outside the reader's {_lerobot.DATA_DIR}/*/*.parquet layout."
             )
         referenced_data.add(data_path)
 
@@ -464,7 +467,7 @@ def _validate_payloads(root: Path, info: DatasetInfo, episodes: datasets.Dataset
             end = _row_float(root, row, f"videos/{key}/to_timestamp", episode_index)
             if start < 0 or end <= start or end - start + _TIMESTAMP_TOLERANCE_S < (length - 1) / info.fps:
                 raise DatasetDirectoryError(
-                    f"{root}/{EPISODES_DIR} episode {episode_index} has an invalid time range for {key!r}."
+                    f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has an invalid time range for {key!r}."
                 )
 
     _require_files(root, referenced_data, "data")
@@ -472,19 +475,25 @@ def _validate_payloads(root: Path, info: DatasetInfo, episodes: datasets.Dataset
 
 
 def _safe_path(root: Path, template: str | None, payload: str, **values: Any) -> Path:
+    if template is None:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} cannot resolve the {payload} path: no template."
+        )
     try:
         path = Path(template.format(**values))
     except (AttributeError, KeyError, TypeError, ValueError) as e:
-        raise DatasetDirectoryError(f"{root}/{INFO_PATH} cannot resolve the {payload} path: {e}") from e
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} cannot resolve the {payload} path: {e}"
+        ) from e
     if path.is_absolute() or ".." in path.parts:
         raise DatasetDirectoryError(
-            f"{root}/{INFO_PATH} resolves {payload} outside the dataset root: {path}."
+            f"{root}/{_lerobot.INFO_PATH} resolves {payload} outside the dataset root: {path}."
         )
     try:
         (root / path).resolve(strict=False).relative_to(root.resolve())
     except ValueError as e:
         raise DatasetDirectoryError(
-            f"{root}/{INFO_PATH} resolves {payload} outside the dataset root: {path}."
+            f"{root}/{_lerobot.INFO_PATH} resolves {payload} outside the dataset root: {path}."
         ) from e
     return path
 
@@ -501,11 +510,11 @@ def _require_files(root: Path, paths: set[Path], payload: str) -> None:
 
 
 def _read_frames(root: Path, info: DatasetInfo, features: datasets.Features) -> datasets.Dataset | None:
-    paths = sorted((root / DATA_DIR).glob("*/*.parquet"))
+    paths = sorted((root / _lerobot.DATA_DIR).glob("*/*.parquet"))
     if not paths:
         if info.total_frames == 0:
             return None
-        raise DatasetDirectoryError(f"{root}/{DATA_DIR} has no loader-visible parquet files.")
+        raise DatasetDirectoryError(f"{root}/{_lerobot.DATA_DIR} has no loader-visible parquet files.")
 
     # `datasets.Dataset.from_parquet(..., features=features)` (called below via
     # `load_nested_dataset`) silently synthesizes a null-filled column for any name present in
@@ -520,19 +529,19 @@ def _read_frames(root: Path, info: DatasetInfo, features: datasets.Features) -> 
             raise DatasetDirectoryError(f"{path} could not be read as parquet: {e}") from e
         if actual_columns != expected_columns:
             raise DatasetDirectoryError(
-                f"{path} does not match the frame schema declared in {INFO_PATH}: expected columns "
+                f"{path} does not match the frame schema declared in {_lerobot.INFO_PATH}: expected columns "
                 f"{sorted(expected_columns)}, found {sorted(actual_columns)}."
             )
 
     try:
-        frames = load_nested_dataset(root / DATA_DIR, features=features)
+        frames = _lerobot.load_nested_dataset(root / _lerobot.DATA_DIR, features=features)
     except Exception as e:
         raise DatasetDirectoryError(
-            f"{root}/{DATA_DIR} does not match the frame schema declared in {INFO_PATH}: {e}"
+            f"{root}/{_lerobot.DATA_DIR} does not match the frame schema declared in {_lerobot.INFO_PATH}: {e}"
         ) from e
     if set(frames.column_names) != expected_columns or len(frames) != info.total_frames:
         raise DatasetDirectoryError(
-            f"{root}/{DATA_DIR} does not contain exactly {info.total_frames} rows with the declared columns."
+            f"{root}/{_lerobot.DATA_DIR} does not contain exactly {info.total_frames} rows with the declared columns."
         )
     return frames
 
@@ -551,17 +560,17 @@ def _validate_frame_metadata(
     if episodes is None or tasks is None:
         raise DatasetDirectoryError(f"{root} has frame data without episode and task metadata.")
 
-    indices = _integer_values(frames["index"], f"{root}/{DATA_DIR} index")
-    episode_indices = _integer_values(frames["episode_index"], f"{root}/{DATA_DIR} episode_index")
-    frame_indices = _integer_values(frames["frame_index"], f"{root}/{DATA_DIR} frame_index")
-    task_indices = _integer_values(frames["task_index"], f"{root}/{DATA_DIR} task_index")
-    timestamps = _float_values(frames["timestamp"], f"{root}/{DATA_DIR} timestamp")
+    indices = _integer_values(frames["index"], f"{root}/{_lerobot.DATA_DIR} index")
+    episode_indices = _integer_values(frames["episode_index"], f"{root}/{_lerobot.DATA_DIR} episode_index")
+    frame_indices = _integer_values(frames["frame_index"], f"{root}/{_lerobot.DATA_DIR} frame_index")
+    task_indices = _integer_values(frames["task_index"], f"{root}/{_lerobot.DATA_DIR} task_index")
+    timestamps = _float_values(frames["timestamp"], f"{root}/{_lerobot.DATA_DIR} timestamp")
     if indices != list(range(info.total_frames)):
-        raise DatasetDirectoryError(f"{root}/{DATA_DIR} index values are not globally contiguous.")
+        raise DatasetDirectoryError(f"{root}/{_lerobot.DATA_DIR} index values are not globally contiguous.")
     invalid_tasks = sorted({value for value in task_indices if not 0 <= value < info.total_tasks})
     if invalid_tasks:
         raise DatasetDirectoryError(
-            f"{root}/{DATA_DIR} contains task_index values with no matching task row: {invalid_tasks}."
+            f"{root}/{_lerobot.DATA_DIR} contains task_index values with no matching task row: {invalid_tasks}."
         )
 
     cursor = 0
@@ -571,26 +580,26 @@ def _validate_frame_metadata(
         end = _row_int(root, row, "dataset_to_index", episode_index)
         if start != cursor or end != start + length or end > info.total_frames:
             raise DatasetDirectoryError(
-                f"{root}/{EPISODES_DIR} episode {episode_index} has inconsistent frame range/length."
+                f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has inconsistent frame range/length."
             )
         if episode_indices[start:end] != [episode_index] * length:
             raise DatasetDirectoryError(
-                f"{root}/{DATA_DIR} rows [{start}, {end}) do not match episode {episode_index}."
+                f"{root}/{_lerobot.DATA_DIR} rows [{start}, {end}) do not match episode {episode_index}."
             )
         if frame_indices[start:end] != list(range(length)):
             raise DatasetDirectoryError(
-                f"{root}/{DATA_DIR} frame_index values for episode {episode_index} are not contiguous."
+                f"{root}/{_lerobot.DATA_DIR} frame_index values for episode {episode_index} are not contiguous."
             )
         for frame_index, timestamp in enumerate(timestamps[start:end]):
             if abs(timestamp - frame_index / info.fps) > _TIMESTAMP_TOLERANCE_S:
                 raise DatasetDirectoryError(
-                    f"{root}/{DATA_DIR} timestamp for episode {episode_index}, frame {frame_index} "
+                    f"{root}/{_lerobot.DATA_DIR} timestamp for episode {episode_index}, frame {frame_index} "
                     f"is not synchronized to fps={info.fps}."
                 )
         cursor = end
     if cursor != info.total_frames:
         raise DatasetDirectoryError(
-            f"{root}/{EPISODES_DIR} frame ranges cover {cursor} rows, expected {info.total_frames}."
+            f"{root}/{_lerobot.EPISODES_DIR} frame ranges cover {cursor} rows, expected {info.total_frames}."
         )
 
 
@@ -603,7 +612,7 @@ def _row_int(root: Path, row: dict, key: str, episode_index: int) -> int:
         return _strict_int(row[key])
     except (KeyError, TypeError, ValueError) as e:
         raise DatasetDirectoryError(
-            f"{root}/{EPISODES_DIR} episode {episode_index} has invalid {key!r}: {e}"
+            f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has invalid {key!r}: {e}"
         ) from e
 
 
@@ -612,10 +621,12 @@ def _row_float(root: Path, row: dict, key: str, episode_index: int) -> float:
         value = float(row[key])
     except (KeyError, TypeError, ValueError) as e:
         raise DatasetDirectoryError(
-            f"{root}/{EPISODES_DIR} episode {episode_index} has invalid {key!r}: {e}"
+            f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has invalid {key!r}: {e}"
         ) from e
     if not math.isfinite(value):
-        raise DatasetDirectoryError(f"{root}/{EPISODES_DIR} episode {episode_index} has non-finite {key!r}.")
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has non-finite {key!r}."
+        )
     return value
 
 
@@ -640,43 +651,3 @@ def _float_values(values: Any, label: str) -> list[float]:
     if not all(math.isfinite(value) for value in result):
         raise DatasetDirectoryError(f"{label} contains non-finite values.")
     return result
-
-
-def _current_git_commit() -> str | None:
-    """Best-effort commit of the LeRobot checkout; ``None`` for wheel/site-packages installs."""
-    package_dir = Path(__file__).resolve().parents[2]
-    # Resolved to an absolute path (rather than passing the bare "git") so bandit's B607
-    # partial-executable-path check doesn't flag a PATH-search invocation: this always runs a
-    # fixed literal argv with no shell and no user input, but bandit can't see that.
-    git = shutil.which("git")
-    if git is None:
-        return None
-    try:
-        root_result = subprocess.run(
-            [git, "rev-parse", "--show-toplevel"],
-            cwd=package_dir,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if root_result.returncode != 0:
-        return None
-
-    repo_root = Path(root_result.stdout.strip()).resolve()
-    if (repo_root / "src" / "lerobot").resolve() != package_dir:
-        return None
-    try:
-        commit_result = subprocess.run(
-            [git, "rev-parse", "HEAD"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if commit_result.returncode != 0:
-        return None
-    return commit_result.stdout.strip() or None

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Network-free guard against the installed ``wandb`` package drifting out from under this
-integration (``lerobot.integrations.wandb_artifacts``) within its pinned version range.
+integration (``lerobot_wandb``) within its pinned version range.
 
 Full SDK mocking in the rest of this test package can't detect the real package changing shape;
 this asserts the exact methods/parameters/properties ``store.py`` and ``cli.py`` call on directly

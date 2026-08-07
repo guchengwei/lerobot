@@ -1,17 +1,31 @@
 # W&B integration package boundary
 
-`WandBLogger` (`src/lerobot/common/wandb_utils.py`) already exists and already
-uploads periodic checkpoints to W&B as `model`-type Artifacts via
-`log_policy()`. Rather than migrating it into the new
-`src/lerobot/integrations/wandb_artifacts/` package, we leave it in place and
-only grow it in-line (new `use_dataset_artifact()` and `log_final_model()`
-methods, refactored to retain `self.run`). The new package holds only
-genuinely new surface: `refs.py`, `store.py`, `inspect.py`, and the
-`lerobot-wandb` sidecar CLI. `wandb_utils.py` imports from `store.py` to do
-its uploads/downloads.
+`WandBLogger` (`src/lerobot/common/wandb_utils.py`) exists and uploads periodic checkpoints to W&B as
+`model`-type Artifacts via `log_policy()`, materializes dataset Artifacts before training, and
+publishes the final model Artifact at the end of training. It stays in the fork, wired into the
+existing training loop (accelerate, multi-rank barriers, checkpoint cadence).
 
-We picked this over consolidating everything into the new package because
-`WandBLogger` is wired into the existing training loop (accelerate,
-multi-rank barriers, checkpoint cadence) and moving it would be a much larger
-diff for no functional gain — it's existing code being extended, not new
-W&B-specific code that constraint 6 asks us to isolate.
+The transfer primitives it calls — and the entire `lerobot-wandb` sidecar CLI — live in a
+separately installable **companion distribution** at `packages/lerobot-wandb` (import package
+`lerobot_wandb`, console script `lerobot-wandb`), decided in [issue #35]. The companion:
+
+- never installs files into the `lerobot` namespace;
+- does not hard-depend on `lerobot` — LeRobot-dependent commands validate the installed version
+  at runtime (`compatibility.py`) and fail with an actionable message when LeRobot is absent or
+  unsupported;
+- imports LeRobot only through the single adapter module `lerobot_wandb/lerobot_adapter.py`
+  (dataset metadata/readers, video re-encoding, checkout commit detection);
+- owns the `lerobot-wandb` console script and the `wandb-workspaces` optional dependency.
+
+`WandBLogger` imports the companion's public API (`download_artifact`, `upload_directory`,
+`validate_dataset_directory`, `inspect_model_directory`, `registry_link_refusal`, sidecar
+helpers) with no reverse import: no `lerobot_wandb` module imports fork-only training code.
+Installing base LeRobot without the training extra must not require the companion at import time,
+so fork-side imports of the companion stay lazy (inside functions or `TYPE_CHECKING`).
+
+The companion base package uses runtime compatibility validation instead of a hard LeRobot
+dependency because it is installed into environments that already contain LeRobot (upstream or a
+compatible fork): a hard dependency would make the resolver replace or shadow that install,
+defeating coexistence.
+
+[issue #35]: https://github.com/guchengwei/lerobot/issues/35

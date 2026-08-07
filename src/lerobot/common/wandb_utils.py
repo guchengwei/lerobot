@@ -29,7 +29,7 @@ from lerobot.configs.train import TrainPipelineConfig
 from lerobot.utils.constants import PRETRAINED_MODEL_DIR
 
 if TYPE_CHECKING:
-    from lerobot.integrations.wandb_artifacts import MaterializedArtifact
+    from lerobot_wandb import MaterializedArtifact
 
 
 def cfg_to_group(
@@ -136,7 +136,7 @@ class WandBLogger:
         Declares the artifact as an input of this run and validates the downloaded directory is a
         loadable LeRobot dataset before it is promoted to `download_root` (see `download_artifact`).
         """
-        from lerobot.integrations.wandb_artifacts import download_artifact, validate_dataset_directory
+        from lerobot_wandb import download_artifact, validate_dataset_directory
 
         return download_artifact(
             self._run,
@@ -216,7 +216,7 @@ class WandBLogger:
         performs the upload, waits for it to be committed, and only then does the link (in that
         order), so the caller never has to guess whether the artifact is durably logged.
         """
-        from lerobot.integrations.wandb_artifacts import (
+        from lerobot_wandb import (
             inspect_model_directory,
             registry_link_refusal,
             upload_directory,
