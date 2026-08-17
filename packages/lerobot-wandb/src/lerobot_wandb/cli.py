@@ -110,11 +110,7 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
     # from it. Preview selection/preparation is also local and happens before any W&B run exists.
     dataset = inspect_transfer_dataset(args.root)
     aliases = args.aliases or ["latest"]
-    sources = (
-        []
-        if args.no_preview
-        else select_dataset_preview_sources(dataset, episodes=args.preview_episodes)
-    )
+    sources = [] if args.no_preview else select_dataset_preview_sources(dataset, episodes=args.preview_episodes)
 
     with contextlib.ExitStack() as exit_stack:
         previews: list[tuple[DatasetPreviewSource, Path]] = []
@@ -152,7 +148,9 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
                 # values make the selected H.264 previews visible in W&B's Media browser.
                 run.log(
                     {
-                        _dataset_media_key(source, index): wandb.Video(str(preview))
+                        _dataset_media_key(
+                            source, index
+                        ): wandb.Video(str(preview))
                         for index, (source, preview) in enumerate(previews)
                     }
                 )
@@ -169,7 +167,11 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
             print("Run media preview: no video exists in this dataset.")
         else:
             for source, _preview in previews:
-                episode = f"episode {source.episode}" if source.episode is not None else "representative v3 chunk"
+                episode = (
+                    f"episode {source.episode}"
+                    if source.episode is not None
+                    else "representative v3 chunk"
+                )
                 print(f"Run media preview: {episode}, {source.video_key} <- {source.relative_path}")
             print("The Artifact keeps the original video bytes; playback is on this upload Run's Media tab.")
 
