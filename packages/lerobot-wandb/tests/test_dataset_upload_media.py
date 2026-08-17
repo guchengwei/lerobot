@@ -57,7 +57,9 @@ def _args(root: Path) -> argparse.Namespace:
     )
 
 
-def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(tmp_path, monkeypatch):
+def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(
+    tmp_path, monkeypatch
+):
     root = tmp_path / "dataset"
     source = root / "videos/chunk-000/observation.images.wrist/episode_000010.mp4"
     source.parent.mkdir(parents=True)
