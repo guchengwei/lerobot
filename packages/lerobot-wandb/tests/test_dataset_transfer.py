@@ -32,7 +32,9 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
-def _write_v21_dataset(root: Path, *, cameras: tuple[str, ...] = ("observation.images.wrist",)) -> None:
+def _write_v21_dataset(
+    root: Path, *, cameras: tuple[str, ...] = ("observation.images.wrist",)
+) -> None:
     features = {
         "action": {"dtype": "float32", "shape": [1], "names": ["motor"]},
         "timestamp": {"dtype": "float32", "shape": [1], "names": None},
@@ -108,9 +110,7 @@ def test_v21_transfer_accepts_episode_per_file_layout(tmp_path):
     assert dataset.metadata.video_keys == ("observation.images.wrist",)
     preview = select_dataset_preview_sources(dataset)[0]
     assert preview.episode == 0
-    assert preview.relative_path == Path(
-        "videos/chunk-000/observation.images.wrist/episode_000000.mp4"
-    )
+    assert preview.relative_path == Path("videos/chunk-000/observation.images.wrist/episode_000000.mp4")
 
 
 def test_v21_default_preview_is_one_deterministic_video(tmp_path):
