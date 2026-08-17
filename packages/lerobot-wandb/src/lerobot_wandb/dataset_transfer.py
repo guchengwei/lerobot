@@ -31,9 +31,10 @@ through W&B even though the installed current LeRobot reader would not train fro
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any, Literal
 
 import av
 import pyarrow.parquet as pq
@@ -236,7 +237,9 @@ def _validate_v21_dataset(root: Path, info: dict[str, Any]) -> DatasetDirectoryM
         raise DatasetDirectoryError(
             f"{root}/{V21_EPISODES_STATS_PATH} contains {len(stats_rows)} rows; expected {total_episodes}."
         )
-    stats_indices = [_row_index(root, row, "episode_index", V21_EPISODES_STATS_PATH) for row in stats_rows]
+    stats_indices = [
+        _row_index(root, row, "episode_index", V21_EPISODES_STATS_PATH) for row in stats_rows
+    ]
     if stats_indices != list(range(total_episodes)):
         raise DatasetDirectoryError(
             f"{root}/{V21_EPISODES_STATS_PATH} must contain one row per episode in order."
@@ -251,7 +254,9 @@ def _validate_v21_dataset(root: Path, info: dict[str, Any]) -> DatasetDirectoryM
     if task_indices != list(range(total_tasks)):
         raise DatasetDirectoryError(f"{root}/{V21_TASKS_PATH} must contain tasks ordered by task_index.")
 
-    expected_parquet_columns = {key for key, feature in features.items() if feature.get("dtype") != "video"}
+    expected_parquet_columns = {
+        key for key, feature in features.items() if feature.get("dtype") != "video"
+    }
     counted_frames = 0
     for episode, row in enumerate(episodes):
         length = _row_positive_int(root, row, "length", episode)
