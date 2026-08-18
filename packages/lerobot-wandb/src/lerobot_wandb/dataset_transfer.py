@@ -41,8 +41,9 @@ import pyarrow.parquet as pq
 from packaging.version import InvalidVersion, Version
 
 from . import lerobot_adapter as _lerobot
+from .compatibility import check_lerobot_compatible
 from .inspect import DatasetDirectoryError, DatasetDirectoryMetadata, inspect_dataset_directory
-from .rollout import prepare_rollout_preview
+from .rollout import prepare_rollout_preview, select_representative_video
 
 V21_INFO_PATH = Path("meta/info.json")
 V21_EPISODES_PATH = Path("meta/episodes.jsonl")
@@ -73,21 +74,24 @@ class DatasetPreviewSource:
 
 def inspect_transfer_dataset(root: Path | str) -> TransferDataset:
     """Validate a v3.0 or canonical v2.1 dataset for byte-preserving transfer."""
+    # Preserve the companion CLI's compatibility boundary before touching the on-disk format. This
+    # keeps a missing LeRobot install actionable even when the caller points at a malformed path.
+    check_lerobot_compatible()
     root = Path(root)
     info = _load_info_json(root)
     version = _parse_schema_version(root, info)
 
-    if version.major >= 3:
+    if version.major == 3:
         metadata = inspect_dataset_directory(root)
         return TransferDataset(root=root, layout="v3", metadata=metadata, info=info)
 
-    if version.major == 2 and version.minor == 1:
+    if version == Version("2.1"):
         metadata = _validate_v21_dataset(root, info)
         return TransferDataset(root=root, layout="v2.1", metadata=metadata, info=info)
 
     raise DatasetDirectoryError(
         f"{root}/{V21_INFO_PATH} declares unsupported dataset schema {version}. "
-        "lerobot-wandb transfer supports v2.1 and the installed current v3.x format."
+        "lerobot-wandb transfer supports only v2.1 and the installed current v3.x format."
     )
 
 
@@ -108,6 +112,15 @@ def select_dataset_preview_sources(
     v3 stores multiple episodes inside one video file, so an episode number cannot honestly identify
     a standalone source video; callers must omit ``episodes`` and get one representative chunk.
     """
+    if dataset.layout == "v3" and episodes:
+        requested = ", ".join(str(ep) for ep in episodes)
+        raise DatasetDirectoryError(
+            "--preview-episode is exact only for v2.1 datasets, where each episode has its own "
+            f"video file. This v3 dataset stores multiple episodes per video chunk (requested: {requested}). "
+            "Omit --preview-episode to log one representative chunk, or use the v2.1 GR00T copy "
+            "when episode-level review is required."
+        )
+
     if dataset.metadata.total_episodes == 0 or not dataset.metadata.video_keys:
         return []
 
@@ -130,23 +143,16 @@ def select_dataset_preview_sources(
             for video_key in video_keys
         ]
 
-    if episodes:
-        requested = ", ".join(str(ep) for ep in episodes)
-        raise DatasetDirectoryError(
-            "--preview-episode is exact only for v2.1 datasets, where each episode has its own "
-            f"video file. This v3 dataset stores multiple episodes per video chunk (requested: {requested}). "
-            "Omit --preview-episode to log one representative chunk, or use the v2.1 GR00T copy "
-            "when episode-level review is required."
-        )
-
-    videos_root = dataset.root / "videos"
-    paths = sorted(path for path in videos_root.rglob("*.mp4") if path.is_file())
-    if not paths:
+    representative = select_representative_video(dataset.root)
+    if representative is None:
         return []
-    relative = paths[0].relative_to(dataset.root)
-    parts = relative.parts
-    video_key = parts[1] if len(parts) > 1 else dataset.metadata.video_keys[0]
-    return [DatasetPreviewSource(episode=None, video_key=video_key, relative_path=relative)]
+    return [
+        DatasetPreviewSource(
+            episode=None,
+            video_key=representative.video_key,
+            relative_path=Path(representative.path),
+        )
+    ]
 
 
 def prepare_dataset_preview(source: Path, destination: Path) -> Path:
@@ -237,9 +243,7 @@ def _validate_v21_dataset(root: Path, info: dict[str, Any]) -> DatasetDirectoryM
         raise DatasetDirectoryError(
             f"{root}/{V21_EPISODES_STATS_PATH} contains {len(stats_rows)} rows; expected {total_episodes}."
         )
-    stats_indices = [
-        _row_index(root, row, "episode_index", V21_EPISODES_STATS_PATH) for row in stats_rows
-    ]
+    stats_indices = [_row_index(root, row, "episode_index", V21_EPISODES_STATS_PATH) for row in stats_rows]
     if stats_indices != list(range(total_episodes)):
         raise DatasetDirectoryError(
             f"{root}/{V21_EPISODES_STATS_PATH} must contain one row per episode in order."
@@ -254,9 +258,8 @@ def _validate_v21_dataset(root: Path, info: dict[str, Any]) -> DatasetDirectoryM
     if task_indices != list(range(total_tasks)):
         raise DatasetDirectoryError(f"{root}/{V21_TASKS_PATH} must contain tasks ordered by task_index.")
 
-    expected_parquet_columns = {
-        key for key, feature in features.items() if feature.get("dtype") != "video"
-    }
+    expected_parquet_columns = {key for key, feature in features.items() if feature.get("dtype") != "video"}
+    video_paths_by_key: dict[str, dict[Path, int]] = {video_key: {} for video_key in video_keys}
     counted_frames = 0
     for episode, row in enumerate(episodes):
         length = _row_positive_int(root, row, "length", episode)
@@ -287,6 +290,13 @@ def _validate_v21_dataset(root: Path, info: dict[str, Any]) -> DatasetDirectoryM
 
         for video_key in video_keys:
             relative = _v21_video_path(root, info, episode, video_key)
+            previous_episode = video_paths_by_key[video_key].get(relative)
+            if previous_episode is not None:
+                raise DatasetDirectoryError(
+                    f"{root}/{V21_INFO_PATH} cannot prove v2.1 episode-per-file videos for "
+                    f"{video_key!r}: episodes {previous_episode} and {episode} resolve to {relative}."
+                )
+            video_paths_by_key[video_key][relative] = episode
             if not (root / relative).is_file():
                 raise DatasetDirectoryError(
                     f"{root} is missing v2.1 video for episode {episode}, {video_key!r}: {relative}."
@@ -332,7 +342,7 @@ def _v21_video_path(root: Path, info: dict[str, Any], episode: int, video_key: s
 def _safe_template_path(root: Path, template: str, payload: str, **values: Any) -> Path:
     try:
         path = Path(template.format(**values))
-    except (KeyError, TypeError, ValueError) as error:
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
         raise DatasetDirectoryError(
             f"{root}/{V21_INFO_PATH} cannot resolve v2.1 {payload} path: {error}"
         ) from error

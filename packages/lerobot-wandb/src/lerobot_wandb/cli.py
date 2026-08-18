@@ -67,7 +67,7 @@ from .dataset_transfer import (
     validate_transfer_dataset,
 )
 from .inspect import (
-    inspect_dataset_directory,
+    DatasetDirectoryError,
     inspect_model_directory,
     registry_link_refusal,
     validate_model_directory,
@@ -98,10 +98,27 @@ from .workspace import (
 DATASET_ARTIFACT_TYPE = "dataset"
 
 
-def _dataset_media_key(source: DatasetPreviewSource, index: int) -> str:
+def _dataset_media_key(
+    source: DatasetPreviewSource,
+    index: int,
+    *,
+    used_keys: set[str] | None = None,
+) -> str:
     episode = f"episode_{source.episode:06d}" if source.episode is not None else "representative"
     camera = "".join(character if character.isalnum() else "_" for character in source.video_key).strip("_")
-    return f"dataset_video/{episode}/{camera or f'camera_{index:03d}'}"
+    key = f"dataset_video/{episode}/{camera or f'camera_{index:03d}'}"
+    if used_keys is None or key not in used_keys:
+        return key
+
+    # Dots and underscores are both normalized above, so retain a reversible encoding of the
+    # original camera key only when that normalization collides with an earlier media key.
+    suffix = source.video_key.encode("utf-8").hex()
+    candidate = f"{key}__camera_{suffix}"
+    duplicate = 1
+    while candidate in used_keys:
+        candidate = f"{key}__camera_{suffix}_{duplicate}"
+        duplicate += 1
+    return candidate
 
 
 def cmd_dataset_upload(args: argparse.Namespace) -> None:
@@ -110,7 +127,9 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
     # from it. Preview selection/preparation is also local and happens before any W&B run exists.
     dataset = inspect_transfer_dataset(args.root)
     aliases = args.aliases or ["latest"]
-    sources = [] if args.no_preview else select_dataset_preview_sources(dataset, episodes=args.preview_episodes)
+    sources = (
+        [] if args.no_preview else select_dataset_preview_sources(dataset, episodes=args.preview_episodes)
+    )
 
     with contextlib.ExitStack() as exit_stack:
         previews: list[tuple[DatasetPreviewSource, Path]] = []
@@ -146,14 +165,13 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
             if previews:
                 # Artifact files are canonical bytes, not W&B run media. Explicit wandb.Video
                 # values make the selected H.264 previews visible in W&B's Media browser.
-                run.log(
-                    {
-                        _dataset_media_key(
-                            source, index
-                        ): wandb.Video(str(preview))
-                        for index, (source, preview) in enumerate(previews)
-                    }
-                )
+                media = {}
+                used_media_keys: set[str] = set()
+                for index, (source, preview) in enumerate(previews):
+                    media_key = _dataset_media_key(source, index, used_keys=used_media_keys)
+                    used_media_keys.add(media_key)
+                    media[media_key] = wandb.Video(str(preview), format="mp4")
+                run.log(media)
         finally:
             # A transcoded preview lives in the sibling temp dir, so it must outlive run.finish().
             run.finish()
@@ -168,9 +186,7 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
         else:
             for source, _preview in previews:
                 episode = (
-                    f"episode {source.episode}"
-                    if source.episode is not None
-                    else "representative v3 chunk"
+                    f"episode {source.episode}" if source.episode is not None else "representative v3 chunk"
                 )
                 print(f"Run media preview: {episode}, {source.video_key} <- {source.relative_path}")
             print("The Artifact keeps the original video bytes; playback is on this upload Run's Media tab.")
@@ -298,7 +314,13 @@ def cmd_rollout_upload(args: argparse.Namespace) -> None:
     # Everything local and fallible happens before `wandb.init` creates a run: a bad directory, an
     # impossible success count, a malformed model ref or an unavailable preview encoder must not
     # leave an empty run behind.
-    metadata = inspect_dataset_directory(args.root)
+    dataset = inspect_transfer_dataset(args.root)
+    if dataset.layout != "v3":
+        raise DatasetDirectoryError(
+            "rollout upload supports only the current v3.0 dataset layout; v2.1 is transfer-only "
+            "and cannot be used for rollout evaluation."
+        )
+    metadata = dataset.metadata
     validate_success_count(args.episodes_succeeded, metadata.total_episodes)
     parsed_model_ref = parse_artifact_ref(args.model_ref)
     video = select_representative_video(args.root)
@@ -346,8 +368,7 @@ def cmd_rollout_upload(args: argparse.Namespace) -> None:
             )
             run.summary.update(summary.to_wandb_metadata())
             if preview_path is not None:
-                # Path only — no fps=/format=: those don't transcode path input and lie about it.
-                run.log({"rollout_video": wandb.Video(str(preview_path))})
+                run.log({"rollout_video": wandb.Video(str(preview_path), format="mp4")})
         finally:
             # Inside the `with`: the preview temp dir must outlive run.finish().
             run.finish()

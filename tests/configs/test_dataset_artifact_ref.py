@@ -14,6 +14,9 @@
 """Validation of `dataset.repo_id` / `dataset.artifact_ref` in `TrainPipelineConfig.validate()`."""
 
 import json
+import subprocess
+import sys
+import textwrap
 
 import draccus
 import pytest
@@ -153,3 +156,44 @@ def test_local_id_derives_a_constructor_name_only_for_artifact_runs():
     assert artifact.repo_id is None
 
     assert DatasetConfig().local_id is None
+
+
+def test_local_id_does_not_require_the_optional_companion():
+    script = textwrap.dedent(
+        """
+        import sys
+
+        attempted_imports = []
+
+        class RejectCompanionImport:
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "lerobot_wandb" or fullname.startswith("lerobot_wandb."):
+                    attempted_imports.append(fullname)
+                    raise ModuleNotFoundError("No module named 'lerobot_wandb'")
+                return None
+
+        sys.meta_path.insert(0, RejectCompanionImport())
+
+        from lerobot.configs.default import DatasetConfig
+
+        assert DatasetConfig(artifact_ref="team/proj/pick-cube:latest").local_id == "pick-cube"
+        assert attempted_imports == []
+        """
+    )
+    subprocess.run([sys.executable, "-c", script], check=True)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "entity/project/name",
+        "entity/project/name:",
+        "entity/project/name:latest/extra",
+        " entity/project/name:v0",
+        "entity//name:v0",
+    ],
+)
+def test_local_id_rejects_malformed_artifact_refs(raw):
+    with pytest.raises(ValueError, match="Invalid W&B artifact reference"):
+        assert DatasetConfig(artifact_ref=raw).local_id is None

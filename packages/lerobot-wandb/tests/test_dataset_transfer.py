@@ -13,18 +13,22 @@
 # limitations under the License.
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from lerobot_wandb import dataset_transfer
+from lerobot_wandb.compatibility import LeRobotCompatibilityError
 from lerobot_wandb.dataset_transfer import (
+    DatasetPreviewSource,
     TransferDataset,
     inspect_transfer_dataset,
     select_dataset_preview_sources,
 )
 from lerobot_wandb.inspect import DatasetDirectoryError, DatasetDirectoryMetadata
+from lerobot_wandb.rollout import RepresentativeVideo
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -33,8 +37,15 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 
 def _write_v21_dataset(
-    root: Path, *, cameras: tuple[str, ...] = ("observation.images.wrist",)
+    root: Path,
+    *,
+    cameras: tuple[str, ...] = ("observation.images.wrist",),
+    video_path: str | None = None,
 ) -> None:
+    chunks_size = 1000
+    video_path_template: str = (
+        video_path or "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4"
+    )
     features = {
         "action": {"dtype": "float32", "shape": [1], "names": ["motor"]},
         "timestamp": {"dtype": "float32", "shape": [1], "names": None},
@@ -54,10 +65,10 @@ def _write_v21_dataset(
         "total_frames": 4,
         "total_tasks": 1,
         "total_chunks": 1,
-        "chunks_size": 1000,
+        "chunks_size": chunks_size,
         "total_videos": 2 * len(cameras),
         "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
-        "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
+        "video_path": video_path_template,
         "features": features,
     }
     (root / "meta").mkdir(parents=True)
@@ -93,9 +104,28 @@ def _write_v21_dataset(
         )
         pq.write_table(table, data_path)
         for camera in cameras:
-            video = root / f"videos/chunk-000/{camera}/episode_{episode:06d}.mp4"
+            video = root / video_path_template.format(
+                episode_chunk=episode // chunks_size,
+                episode_index=episode,
+                video_key=camera,
+            )
             video.parent.mkdir(parents=True, exist_ok=True)
             video.write_bytes(b"test-video-bytes")
+
+
+def test_transfer_validation_reports_compatibility_before_reading_dataset(tmp_path, monkeypatch):
+    calls: list[str] = []
+
+    def _reject_incompatible_install() -> None:
+        calls.append("compatibility")
+        raise LeRobotCompatibilityError("LeRobot is unavailable")
+
+    monkeypatch.setattr(dataset_transfer, "check_lerobot_compatible", _reject_incompatible_install)
+
+    with pytest.raises(LeRobotCompatibilityError, match="unavailable"):
+        inspect_transfer_dataset(tmp_path / "missing")
+
+    assert calls == ["compatibility"]
 
 
 def test_v21_transfer_accepts_episode_per_file_layout(tmp_path):
@@ -123,9 +153,7 @@ def test_v21_default_preview_is_one_deterministic_video(tmp_path):
     assert len(previews) == 1
     assert previews[0].episode == 0
     assert previews[0].video_key == "observation.images.front"
-    assert previews[0].relative_path == Path(
-        "videos/chunk-000/observation.images.front/episode_000000.mp4"
-    )
+    assert previews[0].relative_path == Path("videos/chunk-000/observation.images.front/episode_000000.mp4")
 
 
 def test_v21_preview_episode_selects_every_camera(tmp_path):
@@ -152,6 +180,56 @@ def test_v21_missing_video_is_rejected(tmp_path):
         inspect_transfer_dataset(root)
 
 
+def test_v21_preview_rejects_video_template_without_episode_per_file_proof(tmp_path):
+    root = tmp_path / "v21"
+    _write_v21_dataset(root, video_path="videos/{video_key}/chunk-{episode_chunk:03d}.mp4")
+
+    with pytest.raises(DatasetDirectoryError, match="episode-per-file"):
+        inspect_transfer_dataset(root)
+
+
+@pytest.mark.parametrize(
+    ("total_episodes", "video_keys"),
+    [(0, ("observation.images.wrist",)), (1, ())],
+    ids=["empty-episodes", "empty-video-keys"],
+)
+def test_v3_exact_episode_is_rejected_before_empty_preview_short_circuit(
+    tmp_path, total_episodes, video_keys
+):
+    metadata = DatasetDirectoryMetadata(
+        schema_version="v3.0",
+        robot_type="so101",
+        fps=30,
+        total_episodes=total_episodes,
+        total_frames=0,
+        total_tasks=0,
+        camera_keys=video_keys,
+        video_keys=video_keys,
+        git_commit=None,
+    )
+    dataset = TransferDataset(root=tmp_path, layout="v3", metadata=metadata, info={})
+
+    with pytest.raises(DatasetDirectoryError, match="exact only for v2.1"):
+        select_dataset_preview_sources(dataset, episodes=[0])
+
+
+@pytest.mark.parametrize(
+    "video_path",
+    ["videos/{}/episode.mp4", "videos/{video_key.missing}/episode.mp4"],
+    ids=["positional-field", "attribute-field"],
+)
+def test_v21_malformed_video_template_is_wrapped_as_dataset_error(tmp_path, video_path):
+    root = tmp_path / "v21"
+    _write_v21_dataset(root)
+    info_path = root / "meta/info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["video_path"] = video_path
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+
+    with pytest.raises(DatasetDirectoryError, match="cannot resolve v2.1 video"):
+        inspect_transfer_dataset(root)
+
+
 def test_v3_exact_episode_preview_is_refused(tmp_path):
     metadata = DatasetDirectoryMetadata(
         schema_version="v3.0",
@@ -168,3 +246,46 @@ def test_v3_exact_episode_preview_is_refused(tmp_path):
 
     with pytest.raises(DatasetDirectoryError, match="exact only for v2.1"):
         select_dataset_preview_sources(dataset, episodes=[10])
+
+
+def test_v3_default_preview_uses_declared_representative_path(tmp_path, monkeypatch):
+    metadata = DatasetDirectoryMetadata(
+        schema_version="v3.0",
+        robot_type="so101",
+        fps=30,
+        total_episodes=20,
+        total_frames=100,
+        total_tasks=1,
+        camera_keys=("observation.images.wrist",),
+        video_keys=("observation.images.wrist",),
+        git_commit=None,
+    )
+    dataset = TransferDataset(
+        root=tmp_path,
+        layout="v3",
+        metadata=metadata,
+        info={"video_path": "recordings/{video_key}/{chunk_index:03d}-{file_index:03d}.mkv"},
+    )
+    representative = RepresentativeVideo(
+        path=PurePosixPath("recordings/observation.images.wrist/002-003.mkv"),
+        video_key="observation.images.wrist",
+        episodes=(10, 11),
+    )
+    monkeypatch.setattr(dataset_transfer, "select_representative_video", lambda _root: representative)
+
+    assert select_dataset_preview_sources(dataset) == [
+        DatasetPreviewSource(
+            episode=None,
+            video_key="observation.images.wrist",
+            relative_path=Path("recordings/observation.images.wrist/002-003.mkv"),
+        )
+    ]
+
+
+def test_future_dataset_schema_is_rejected_instead_of_using_v3_reader(tmp_path):
+    root = tmp_path / "future"
+    (root / "meta").mkdir(parents=True)
+    (root / "meta/info.json").write_text(json.dumps({"codebase_version": "v4.0"}), encoding="utf-8")
+
+    with pytest.raises(DatasetDirectoryError, match="unsupported dataset schema"):
+        inspect_transfer_dataset(root)

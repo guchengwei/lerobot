@@ -34,7 +34,8 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.pyav_utils import get_codec
 
 from lerobot_wandb import cli, workspace as cli_ws
-from lerobot_wandb.inspect import DatasetDirectoryError, ModelDirectoryError
+from lerobot_wandb.dataset_transfer import TransferDataset
+from lerobot_wandb.inspect import DatasetDirectoryError, DatasetDirectoryMetadata, ModelDirectoryError
 from lerobot_wandb.store import ArtifactTypeMismatchError, MaterializedArtifact
 
 require_h264 = pytest.mark.skipif(
@@ -262,7 +263,7 @@ def test_dataset_download_happy_path(tmp_path, monkeypatch, capsys):
     assert init_calls[0]["entity"] == "my-team"
     assert init_calls[0]["project"] == "my-project"
     assert init_calls[0]["mode"] == "online"
-    assert validator_calls == [cli.validate_dataset_directory]
+    assert validator_calls == [cli.validate_transfer_dataset]
     run.finish.assert_called_once()
 
     out = capsys.readouterr().out
@@ -672,6 +673,35 @@ def test_rollout_upload_rejects_a_directory_that_is_not_a_dataset(tmp_path, monk
     assert init_calls == []
 
 
+def test_rollout_upload_rejects_v21_transfer_layout_before_creating_a_run(tmp_path, monkeypatch):
+    rollout_root = tmp_path / "rollout"
+    rollout_root.mkdir()
+    transfer = TransferDataset(
+        root=rollout_root,
+        layout="v2.1",
+        metadata=DatasetDirectoryMetadata(
+            schema_version="v2.1",
+            robot_type="so101",
+            fps=30,
+            total_episodes=1,
+            total_frames=1,
+            total_tasks=1,
+            camera_keys=(),
+            video_keys=(),
+            git_commit=None,
+        ),
+        info={},
+    )
+    monkeypatch.setattr(cli, "inspect_transfer_dataset", lambda _root: transfer)
+    init_calls = []
+    monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: init_calls.append(kwargs) or _fake_run())
+
+    with pytest.raises(DatasetDirectoryError, match="v2.1"):
+        cli.main(_rollout_argv(rollout_root))
+
+    assert init_calls == []
+
+
 @require_h264
 def test_rollout_upload_happy_path(tmp_path, monkeypatch, capsys):
     rollout_root = tmp_path / "rollout"
@@ -730,11 +760,10 @@ def test_rollout_upload_happy_path(tmp_path, monkeypatch, capsys):
     assert logged_summary.items() <= metadata.items()
 
     # Exactly one derived preview reaches the run, and nothing else: the original (AV1) video stays
-    # in the artifact root, the preview lives outside it, and no fps=/format= kwargs are passed
-    # (those don't transcode path input and would lie about it).
+    # in the artifact root, the preview lives outside it, and W&B receives an explicit MP4 format.
     assert len(video_calls) == 1
     preview_path_arg, video_kwargs = video_calls[0]
-    assert video_kwargs == {}  # fps=/format= removed
+    assert video_kwargs == {"format": "mp4"}
     assert rollout_root not in Path(preview_path_arg).parents  # outside the artifact root
     assert sorted(rollout_root.rglob("*.mp4")) == [
         rollout_root / "videos/observation.images.cam/chunk-000/file-000.mp4"

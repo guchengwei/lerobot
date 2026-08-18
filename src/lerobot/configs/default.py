@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from lerobot.transforms import ImageTransformsConfig
 from lerobot.utils.import_utils import get_safe_default_video_backend
 
+from .artifact_ref import artifact_collection_name
 from .video import DEFAULT_DEPTH_UNIT, DEPTH_METER_UNIT, DEPTH_MILLIMETER_UNIT
 
 
@@ -81,9 +82,7 @@ class DatasetConfig:
         if self.repo_id or self.artifact_ref is None:
             return self.repo_id
 
-        from lerobot_wandb import parse_artifact_ref
-
-        return parse_artifact_ref(self.artifact_ref).name
+        return artifact_collection_name(self.artifact_ref)
 
 
 @dataclass

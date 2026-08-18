@@ -26,7 +26,11 @@ from lerobot_wandb.dataset_transfer import DatasetPreviewSource, TransferDataset
 from lerobot_wandb.inspect import DatasetDirectoryMetadata
 
 
-def _transfer_dataset(root: Path) -> TransferDataset:
+def _transfer_dataset(
+    root: Path,
+    *,
+    video_keys: tuple[str, ...] = ("observation.images.wrist",),
+) -> TransferDataset:
     return TransferDataset(
         root=root,
         layout="v2.1",
@@ -37,8 +41,8 @@ def _transfer_dataset(root: Path) -> TransferDataset:
             total_episodes=11,
             total_frames=22,
             total_tasks=1,
-            camera_keys=("observation.images.wrist",),
-            video_keys=("observation.images.wrist",),
+            camera_keys=video_keys,
+            video_keys=video_keys,
             git_commit=None,
         ),
         info={},
@@ -57,9 +61,7 @@ def _args(root: Path) -> argparse.Namespace:
     )
 
 
-def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(
-    tmp_path, monkeypatch
-):
+def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(tmp_path, monkeypatch):
     root = tmp_path / "dataset"
     source = root / "videos/chunk-000/observation.images.wrist/episode_000010.mp4"
     source.parent.mkdir(parents=True)
@@ -100,7 +102,13 @@ def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(
         return run
 
     monkeypatch.setattr(cli.wandb, "init", _init)
-    monkeypatch.setattr(cli.wandb, "Video", lambda path: f"video:{path}")
+    video_calls = []
+
+    def _video(path, **kwargs):
+        video_calls.append((path, kwargs))
+        return f"video:{path}"
+
+    monkeypatch.setattr(cli.wandb, "Video", _video)
 
     upload_calls = []
 
@@ -129,8 +137,57 @@ def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(
     media = run.log.call_args.args[0]
     assert list(media) == ["dataset_video/episode_000010/observation_images_wrist"]
     assert str(state["preview"]) in media[next(iter(media))]
+    assert video_calls == [(str(state["preview"]), {"format": "mp4"})]
     run.finish.assert_called_once()
     assert not Path(state["preview"]).exists()
+
+
+def test_dataset_upload_keeps_media_for_colliding_camera_sanitized_keys(tmp_path, monkeypatch):
+    root = tmp_path / "dataset"
+    video_keys = ("observation.images.front", "observation_images_front")
+    sources = []
+    for video_key in video_keys:
+        source = root / f"videos/{video_key}/episode_000010.mp4"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"source")
+        sources.append(
+            DatasetPreviewSource(
+                episode=10,
+                video_key=video_key,
+                relative_path=source.relative_to(root),
+            )
+        )
+
+    dataset = _transfer_dataset(root, video_keys=video_keys)
+    monkeypatch.setattr(cli, "inspect_transfer_dataset", lambda _root: dataset)
+    monkeypatch.setattr(
+        cli,
+        "select_dataset_preview_sources",
+        lambda _dataset, *, episodes: sources,
+    )
+
+    def _prepare(_source: Path, destination: Path) -> Path:
+        destination.write_bytes(b"h264-preview")
+        return destination
+
+    monkeypatch.setattr(cli, "prepare_dataset_preview", _prepare)
+    run = MagicMock()
+    monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: run)
+    monkeypatch.setattr(cli.wandb, "Video", lambda path, **kwargs: f"video:{path}")
+    monkeypatch.setattr(
+        cli,
+        "upload_directory",
+        lambda *args, **kwargs: SimpleNamespace(resolved_ref="my-team/my-project/pick-cube-v21:v0"),
+    )
+
+    cli.cmd_dataset_upload(_args(root))
+
+    media = run.log.call_args.args[0]
+    base = "dataset_video/episode_000010/observation_images_front"
+    assert len(media) == 2
+    assert len(set(media)) == 2
+    assert base in media
+    assert f"{base}__camera_{video_keys[1].encode().hex()}" in media
 
 
 def test_dataset_preview_failure_happens_before_wandb_init(tmp_path, monkeypatch):
