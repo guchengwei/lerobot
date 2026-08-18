@@ -81,14 +81,13 @@ LeRobot が導入済みの environment に、そのまま追加で導入しま�
 
 ```bash
 pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
-# optional: append [wandb-workspace] (e.g. lerobot-wandb[wandb-workspace] @ git+...) for workspace create
 ```
 
 この distribution はまだ PyPI に公開されていません。公開された後の install は `pip install
 lerobot-wandb` に短縮されます。
 
 この manual の training（§3）と final model publication（§7）は fork 専用機能です。dataset/model/
-rollout Artifact の transfer、promotion、workspace creation は plain upstream LeRobot でも動作します。
+rollout Artifact の transfer と promotion は plain upstream LeRobot でも動作します。
 LeRobot が必要な command は起動時に導入 version を検証し（対応 range は `>=0.6.1,<0.7.0`）、
 LeRobot が無い・非対応の場合は actionable message で失敗します（`--allow-unsupported-lerobot` が
 実験的な override です）。
@@ -264,43 +263,6 @@ entry として拒否されます。
 Registry link は project alias を移動する前に試行されます。2 つの server-side write をまとめる transaction は
 ないため、この順序にすることで Registry link が失敗した場合でも `production` alias は変更されません。
 rollout の結果が promotion に十分かどうかは operator が Run を確認して判断します。
-
-## 8. 再利用可能な rollout-review Workspace を作成する(任意)
-
-rollout upload は、この手順がなくても常に project の Run として表示されます。このコマンドは追加で、
-rollout Run を 1 か所にまとめる 1 つの curated Workspace(project review view)を設定します。
-`rollout_video` という media key の再生 gallery、success rate と rollout の各指標の chart、requested
-と resolved の model ref を列挙する Runs table が含まれます。Workspace の作成は project 設定であって
-Run ではありません。`wandb.init` は呼ばれず、何も upload されません。
-
-このコマンドには任意の extra が必要です:
-
-```bash
-pip install "lerobot-wandb[wandb-workspace]"
-```
-
-1 回だけの project setup:
-
-```bash
-lerobot-wandb workspace create \
-  --entity "$WANDB_ENTITY" \
-  --project "$WANDB_PROJECT"
-```
-
-実行すると Workspace URL が表示されます。再実行しても安全です。このコマンドが作成した Workspace は
-複製されず再利用され、他の Workspace には一切触れません(UI で同名の Workspace を手動作成していた
-場合は採用されません。このコマンドは自分が作成したものだけを認識します)。upload が Workspace を
-作成・変更することもありません。この 2 つは独立しています。
-
-`--replace` は名前指定の Workspace だけを決定的な LeRobot template で更新します。例えば upgrade で
-panel 構成が変わった後に使用します:
-
-```bash
-lerobot-wandb workspace create \
-  --entity "$WANDB_ENTITY" \
-  --project "$WANDB_PROJECT" \
-  --replace
-```
 
 ## 保存先と lineage
 

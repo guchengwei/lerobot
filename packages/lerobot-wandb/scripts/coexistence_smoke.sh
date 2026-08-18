@@ -31,7 +31,7 @@ A_PY="$WORKDIR/env-a/bin/python"
 BEFORE_VERSION="$("$A_PY" -c 'import importlib.metadata as m; print(m.version("lerobot"))')"
 BEFORE_LOCATION="$("$A_PY" -c 'import importlib.metadata as m; print(m.distribution("lerobot")._path)')"
 
-"$A_PIP" install -q "$WHEEL[wandb-workspace,test]"
+"$A_PIP" install -q "$WHEEL[test]"
 
 AFTER_VERSION="$("$A_PY" -c 'import importlib.metadata as m; print(m.version("lerobot"))')"
 AFTER_LOCATION="$("$A_PY" -c 'import importlib.metadata as m; print(m.distribution("lerobot")._path)')"

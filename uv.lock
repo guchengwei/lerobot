@@ -2872,7 +2872,7 @@ all = [
     { name = "ipykernel" },
     { name = "jsonlines" },
     { name = "jupyter" },
-    { name = "lerobot-wandb", extra = ["wandb-workspace"] },
+    { name = "lerobot-wandb" },
     { name = "matplotlib" },
     { name = "metaworld" },
     { name = "mock-serial", marker = "sys_platform != 'win32'" },
@@ -3445,7 +3445,6 @@ requires-dist = [
     { name = "lerobot", extras = ["wallx"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["xvla"], marker = "extra == 'all'" },
     { name = "lerobot-wandb", marker = "extra == 'training'", editable = "packages/lerobot-wandb" },
-    { name = "lerobot-wandb", extras = ["wandb-workspace"], marker = "extra == 'all'", editable = "packages/lerobot-wandb" },
     { name = "matplotlib", marker = "extra == 'matplotlib-dep'", specifier = ">=3.10.3,<4.0.0" },
     { name = "meshcat", marker = "extra == 'unitree-g1'", specifier = ">=0.3.0,<0.4.0" },
     { name = "metaworld", marker = "extra == 'metaworld'", specifier = "==3.0.0" },
@@ -3522,11 +3521,6 @@ dependencies = [
     { name = "wandb" },
 ]
 
-[package.optional-dependencies]
-wandb-workspace = [
-    { name = "wandb-workspaces" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "av", specifier = ">=15.0.0,<16.0.0" },
@@ -3538,9 +3532,8 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=21.0.0,<30.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.1.0,<9.0.0" },
     { name = "wandb", specifier = ">=0.24.1,<0.28.0" },
-    { name = "wandb-workspaces", marker = "extra == 'wandb-workspace'", specifier = ">=0.4.0,<0.5.0" },
 ]
-provides-extras = ["lerobot", "wandb-workspace", "test"]
+provides-extras = ["lerobot", "test"]
 
 [[package]]
 name = "librt"
@@ -7054,19 +7047,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/9b/aa94eb8265b0c55dc6c3e435c11241b3f885c7a1720718046efd7cbd8361/wandb-0.27.2-py3-none-win32.whl", hash = "sha256:5c55fad8c7be9d345dcebdc9dc10f7d2ac5af5bede62acbcd79a412ccaf48c87", size = 24151396, upload-time = "2026-06-06T01:46:54.793Z" },
     { url = "https://files.pythonhosted.org/packages/bf/0b/9e442779f5f24baaca044daf7546a735f41a811886b84ae12740d51b7f9d/wandb-0.27.2-py3-none-win_amd64.whl", hash = "sha256:87204d4fe40fbd9a1fe89a05927ce4ddb8be34d8210045457819fb4a35e0bcea", size = 24151404, upload-time = "2026-06-06T01:46:56.994Z" },
     { url = "https://files.pythonhosted.org/packages/aa/3a/01ab3afc1f6f962df93db34be8183147c9821e4dce82dc03313fb8d08635/wandb-0.27.2-py3-none-win_arm64.whl", hash = "sha256:32ed7456f40443c971e95dd63704d840fce66c24f88049a9bda8a09dfe85effe", size = 22063373, upload-time = "2026-06-06T01:47:00.263Z" },
-]
-
-[[package]]
-name = "wandb-workspaces"
-version = "0.4.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "wandb" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/ea/36baee6eb9e6df05fba9425d853c61b298a443ccb87c497e35f9b4cc9c5b/wandb_workspaces-0.4.5.tar.gz", hash = "sha256:4df63f42f8cc9ed37c6b5d50e823baf9b34cc55a3f898b34fd4a72da59ce35d1", size = 245256, upload-time = "2026-08-04T14:23:12.608Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/1f/ea940756a5a8f50ec52d0748d11a2dfb2bb8c7fa396545abf2cd504c19a3/wandb_workspaces-0.4.5-py3-none-any.whl", hash = "sha256:c29d9ec33f5726f66fb37e6e66af0ed76043ea86f70a952208b0231b2c0ac767", size = 115180, upload-time = "2026-08-04T14:23:11.036Z" },
 ]
 
 [[package]]

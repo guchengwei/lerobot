@@ -119,8 +119,6 @@ training = [
     "lerobot[accelerate-dep]",
     "lerobot-wandb",
 ]
-# NOTE: the workspace feature's `wandb-workspaces` dependency is owned by the companion
-# distribution (`lerobot-wandb[wandb-workspace]`), never by this one.
 hardware = [
     "lerobot[pynput-dep]",
     "lerobot[pyserial-dep]",
@@ -295,9 +293,6 @@ all = [
     "lerobot[training]",
     "lerobot[hardware]",
     "lerobot[viz]",
-    # Workspace command support (`lerobot-wandb workspace create`). The companion owns
-    # the `wandb-workspaces` dependency; `training` pulls the companion without it.
-    "lerobot-wandb[wandb-workspace]",
     # NOTE(resolver hint): scipy is pulled in transitively via lerobot[scipy-dep] through
     # multiple extras (aloha, metaworld, pi, wallx, phone). Listing it explicitly
     # helps pip's resolver converge by constraining scipy early, before it encounters
