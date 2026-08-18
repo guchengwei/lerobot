@@ -51,6 +51,7 @@ V21_EPISODES_STATS_PATH = Path("meta/episodes_stats.jsonl")
 V21_TASKS_PATH = Path("meta/tasks.jsonl")
 
 DatasetLayout = Literal["v2.1", "v3"]
+DEFAULT_PREVIEW_MAX_EPISODES = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +71,8 @@ class DatasetPreviewSource:
     episode: int | None
     video_key: str
     relative_path: Path
+    start_timestamp_s: float | None = None
+    end_timestamp_s: float | None = None
 
 
 def inspect_transfer_dataset(root: Path | str) -> TransferDataset:
@@ -104,35 +107,44 @@ def select_dataset_preview_sources(
     dataset: TransferDataset,
     *,
     episodes: Sequence[int] = (),
+    preview_all: bool = False,
+    max_episodes: int = DEFAULT_PREVIEW_MAX_EPISODES,
 ) -> list[DatasetPreviewSource]:
     """Select bounded review media without changing the canonical artifact.
 
     With no explicit episode request, exactly one deterministic representative source is selected.
-    For v2.1, ``episodes`` may be repeated and selects every camera video for those exact episodes.
-    v3 stores multiple episodes inside one video file, so an episode number cannot honestly identify
-    a standalone source video; callers must omit ``episodes`` and get one representative chunk.
+    Explicit episodes and ``preview_all`` select every camera for each selected episode. v2.1
+    sources are already episode-per-file; v3 sources carry the exact timestamp range to trim from
+    their shared video file. ``preview_all`` is refused when the dataset exceeds ``max_episodes``.
     """
-    if dataset.layout == "v3" and episodes:
-        requested = ", ".join(str(ep) for ep in episodes)
+    if preview_all and episodes:
         raise DatasetDirectoryError(
-            "--preview-episode is exact only for v2.1 datasets, where each episode has its own "
-            f"video file. This v3 dataset stores multiple episodes per video chunk (requested: {requested}). "
-            "Omit --preview-episode to log one representative chunk, or use the v2.1 GR00T copy "
-            "when episode-level review is required."
+            "--preview-all and --preview-episode are mutually exclusive; choose one review mode."
         )
+    if preview_all and max_episodes <= 0:
+        raise DatasetDirectoryError(f"preview maximum must be greater than zero, got {max_episodes}.")
+    if preview_all and dataset.metadata.total_episodes > max_episodes:
+        raise DatasetDirectoryError(
+            f"--preview-all selected {dataset.metadata.total_episodes} episodes, exceeding the configured "
+            f"maximum of {max_episodes}. Raise --preview-max-episodes explicitly to allow this upload."
+        )
+
+    selected = list(range(dataset.metadata.total_episodes)) if preview_all else list(dict.fromkeys(episodes))
+    for episode in selected:
+        if episode < 0 or episode >= dataset.metadata.total_episodes:
+            raise DatasetDirectoryError(
+                f"preview episode {episode} is outside the dataset range "
+                f"0..{dataset.metadata.total_episodes - 1}."
+            )
 
     if dataset.metadata.total_episodes == 0 or not dataset.metadata.video_keys:
         return []
 
     if dataset.layout == "v2.1":
-        selected = list(dict.fromkeys(episodes)) if episodes else [0]
-        for episode in selected:
-            if episode < 0 or episode >= dataset.metadata.total_episodes:
-                raise DatasetDirectoryError(
-                    f"preview episode {episode} is outside the dataset range "
-                    f"0..{dataset.metadata.total_episodes - 1}."
-                )
+        selected = selected or [0]
         video_keys = dataset.metadata.video_keys if episodes else dataset.metadata.video_keys[:1]
+        if preview_all:
+            video_keys = dataset.metadata.video_keys
         return [
             DatasetPreviewSource(
                 episode=episode,
@@ -141,6 +153,31 @@ def select_dataset_preview_sources(
             )
             for episode in selected
             for video_key in video_keys
+        ]
+
+    if selected:
+        video_path = dataset.info.get("video_path")
+        if not isinstance(video_path, str):
+            raise DatasetDirectoryError(
+                f"{dataset.root}/{V21_INFO_PATH} cannot resolve episode previews: no video_path template."
+            )
+        rows = {int(row["episode_index"]): row for row in _lerobot.load_episodes(dataset.root)}
+        return [
+            DatasetPreviewSource(
+                episode=episode,
+                video_key=video_key,
+                relative_path=Path(
+                    video_path.format(
+                        video_key=video_key,
+                        chunk_index=int(rows[episode][f"videos/{video_key}/chunk_index"]),
+                        file_index=int(rows[episode][f"videos/{video_key}/file_index"]),
+                    )
+                ),
+                start_timestamp_s=float(rows[episode][f"videos/{video_key}/from_timestamp"]),
+                end_timestamp_s=float(rows[episode][f"videos/{video_key}/to_timestamp"]),
+            )
+            for episode in selected
+            for video_key in dataset.metadata.video_keys
         ]
 
     representative = select_representative_video(dataset.root)
@@ -155,11 +192,22 @@ def select_dataset_preview_sources(
     ]
 
 
-def prepare_dataset_preview(source: Path, destination: Path) -> Path:
-    """Return a browser-playable preview, avoiding a transcode when the source already qualifies."""
-    if _is_browser_h264(source):
+def prepare_dataset_preview(
+    source: Path,
+    destination: Path,
+    *,
+    start_timestamp_s: float | None = None,
+    end_timestamp_s: float | None = None,
+) -> Path:
+    """Create browser-playable review media, optionally trimming one exact v3 episode."""
+    if start_timestamp_s is None and end_timestamp_s is None and _is_browser_h264(source):
         return source
-    return prepare_rollout_preview(source, destination)
+    return prepare_rollout_preview(
+        source,
+        destination,
+        start_time_s=start_timestamp_s,
+        end_time_s=end_timestamp_s,
+    )
 
 
 def _is_browser_h264(path: Path) -> bool:

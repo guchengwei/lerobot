@@ -55,11 +55,13 @@ import contextlib
 import logging
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 import wandb
 
 from .compatibility import LeRobotCompatibilityError, set_allow_unsupported
 from .dataset_transfer import (
+    DEFAULT_PREVIEW_MAX_EPISODES,
     DatasetPreviewSource,
     inspect_transfer_dataset,
     prepare_dataset_preview,
@@ -91,6 +93,13 @@ from .store import (
 DATASET_ARTIFACT_TYPE = "dataset"
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
 def _dataset_media_key(
     source: DatasetPreviewSource,
     index: int,
@@ -98,7 +107,10 @@ def _dataset_media_key(
     used_keys: set[str] | None = None,
 ) -> str:
     episode = f"episode_{source.episode:06d}" if source.episode is not None else "representative"
-    camera = "".join(character if character.isalnum() else "_" for character in source.video_key).strip("_")
+    # Percent-encode path separators and non-ASCII bytes while preserving common camera-key
+    # punctuation. Unlike lossy underscore normalization, this remains reversible and keeps
+    # `observation.images.front` distinct from `observation_images_front`.
+    camera = quote(source.video_key, safe="")
     key = f"dataset_video/{episode}/{camera or f'camera_{index:03d}'}"
     if used_keys is None or key not in used_keys:
         return key
@@ -121,7 +133,14 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
     dataset = inspect_transfer_dataset(args.root)
     aliases = args.aliases or ["latest"]
     sources = (
-        [] if args.no_preview else select_dataset_preview_sources(dataset, episodes=args.preview_episodes)
+        []
+        if args.no_preview
+        else select_dataset_preview_sources(
+            dataset,
+            episodes=args.preview_episodes,
+            preview_all=args.preview_all,
+            max_episodes=args.preview_max_episodes,
+        )
     )
 
     with contextlib.ExitStack() as exit_stack:
@@ -142,6 +161,8 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
                 preview = prepare_dataset_preview(
                     root / source.relative_path,
                     tmp_dir / f"preview-{index:03d}.mp4",
+                    start_timestamp_s=source.start_timestamp_s,
+                    end_timestamp_s=source.end_timestamp_s,
                 )
                 previews.append((source, preview))
 
@@ -431,16 +452,30 @@ def build_parser() -> argparse.ArgumentParser:
         "Artifact, with a browser-playable review preview when video exists.",
     )
     _add_upload_args(dataset_upload_parser)
-    dataset_upload_parser.add_argument(
+    preview_selectors = dataset_upload_parser.add_mutually_exclusive_group()
+    preview_selectors.add_argument(
         "--preview-episode",
         dest="preview_episodes",
         type=int,
         action="append",
         default=[],
-        help="Repeatable v2.1-only exact episode selector for W&B run-media previews. All camera "
+        help="Repeatable exact episode selector for W&B run-media previews. All camera "
         "videos for each requested episode are logged. Without this flag, one deterministic "
-        "representative video is logged. v3 stores multiple episodes per video file, so exact "
-        "episode selection is refused there rather than mislabeled.",
+        "representative video is logged. Shared v3 video chunks are trimmed to the selected "
+        "episode boundaries before publication.",
+    )
+    preview_selectors.add_argument(
+        "--preview-all",
+        action="store_true",
+        help="Publish every episode and camera as separate review media. Refused when the dataset "
+        "exceeds --preview-max-episodes.",
+    )
+    dataset_upload_parser.add_argument(
+        "--preview-max-episodes",
+        type=_positive_int,
+        default=DEFAULT_PREVIEW_MAX_EPISODES,
+        help=f"Maximum episodes allowed by --preview-all (default: {DEFAULT_PREVIEW_MAX_EPISODES}). "
+        "Raise this explicitly to opt into larger review-media uploads.",
     )
     dataset_upload_parser.add_argument(
         "--no-preview",

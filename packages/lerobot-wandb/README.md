@@ -67,13 +67,25 @@ lerobot-wandb dataset upload \
 ```
 
 Repeat `--preview-episode` to publish more review episodes. Every camera video for each requested
-v2.1 episode is logged as Run media under an episode-labelled key. Without the flag, only one
-deterministic representative video is logged, so the upload does not duplicate the full dataset as
-media.
+episode is logged as Run media under a deterministic episode-and-camera key. v2.1 already stores
+one file per episode and camera. For v3, where one video file can span several episodes, the command
+uses the dataset metadata timestamps to create an H.264/yuv420p derivative containing only the
+selected episode. The canonical source file in the Artifact is never re-encoded or replaced.
 
-v3 video files can span multiple episodes, so `--preview-episode` is deliberately refused for v3
-rather than labeling a shared chunk as one episode. Omit the flag for one representative v3 chunk,
-or review the episode-per-file v2.1 copy when exact episode selection is required.
+To review every episode explicitly, use the bounded all-episode mode:
+
+```bash
+lerobot-wandb dataset upload \
+  --root ./pick-cube \
+  --entity my-team --project so101-pick-cube --name pick-cube \
+  --preview-all
+```
+
+`--preview-all` and `--preview-episode` are mutually exclusive. All-episode publication defaults to
+a maximum of 50 episodes; a larger dataset is refused before a W&B Run is created. Raising
+`--preview-max-episodes N` is an explicit opt-in to the additional encoding, storage, and upload
+cost. Without either selector, only one deterministic representative video is logged. Use
+`--no-preview` to generate and publish no review derivatives.
 
 ## Fork-only features
 

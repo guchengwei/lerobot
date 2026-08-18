@@ -142,10 +142,23 @@ def codebase_version() -> str:
 # --- Video re-encoding ------------------------------------------------------
 
 
-def reencode_video(source: Any, destination: Any, *, video_encoder: Any, overwrite: bool) -> None:
+def reencode_video(
+    source: Any,
+    destination: Any,
+    *,
+    video_encoder: Any,
+    overwrite: bool,
+    start_time_s: float | None = None,
+    end_time_s: float | None = None,
+) -> None:
     """See ``lerobot.datasets.video_utils.reencode_video``."""
     _module(_VIDEO_UTILS).reencode_video(
-        source, destination, video_encoder=video_encoder, overwrite=overwrite
+        source,
+        destination,
+        video_encoder=video_encoder,
+        overwrite=overwrite,
+        start_time_s=start_time_s,
+        end_time_s=end_time_s,
     )
 
 

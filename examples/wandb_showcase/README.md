@@ -140,6 +140,13 @@ The command prints an immutable resolved reference such as
 `your-wandb-entity/so101-pick-cube/pick-cube:v0`. W&B records that resolved version when training
 starts, even though the next command requests the mutable `raw` alias.
 
+For episode-by-episode review in the Run Media tab, repeat `--preview-episode N`, or use
+`--preview-all` to publish every episode and camera. In v3 datasets, each review item is sliced from
+the shared video chunk using the episode timestamps; the Artifact keeps the original video bytes.
+All-episode mode is capped at 50 episodes by default and fails before creating a Run when the
+dataset is larger. Raise `--preview-max-episodes N` explicitly to accept the extra upload cost, or
+use `--no-preview` to publish no review media.
+
 ## 3. Train directly from the Artifact
 
 Exactly one of `dataset.repo_id` and `dataset.artifact_ref` may be set. The Artifact is materialized
