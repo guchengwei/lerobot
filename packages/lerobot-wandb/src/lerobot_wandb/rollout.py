@@ -32,7 +32,13 @@ from .inspect import DatasetDirectoryMetadata
 ROLLOUT_ARTIFACT_TYPE = "rollout"
 
 
-def prepare_rollout_preview(source: Path, destination: Path) -> Path:
+def prepare_rollout_preview(
+    source: Path,
+    destination: Path,
+    *,
+    start_time_s: float | None = None,
+    end_time_s: float | None = None,
+) -> Path:
     """Transcode one rollout video into a browser-compatible H.264/yuv420p preview.
 
     A display derivative only: the original file stays in the rollout Artifact
@@ -42,7 +48,14 @@ def prepare_rollout_preview(source: Path, destination: Path) -> Path:
     root so the preview cannot enter the Artifact manifest.
     """
     encoder = _lerobot.RGBEncoderConfig(vcodec="h264", pix_fmt="yuv420p")
-    _lerobot.reencode_video(source, destination, video_encoder=encoder, overwrite=True)
+    _lerobot.reencode_video(
+        source,
+        destination,
+        video_encoder=encoder,
+        overwrite=True,
+        start_time_s=start_time_s,
+        end_time_s=end_time_s,
+    )
     return destination
 
 

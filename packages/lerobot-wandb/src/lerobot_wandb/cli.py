@@ -59,10 +59,11 @@ from pathlib import Path
 import wandb
 
 from .compatibility import LeRobotCompatibilityError, set_allow_unsupported
+from .dataset_preview import PreparedPreviewBatch, dataset_media_key, prepare_dataset_previews
 from .dataset_transfer import (
-    DatasetPreviewSource,
+    DEFAULT_PREVIEW_MAX_EPISODES,
+    TransferDataset,
     inspect_transfer_dataset,
-    prepare_dataset_preview,
     select_dataset_preview_sources,
     validate_transfer_dataset,
 )
@@ -90,28 +91,16 @@ from .store import (
 
 DATASET_ARTIFACT_TYPE = "dataset"
 
+# Kept as a local alias for the CLI's existing private seam; the Workspace contract itself lives
+# with the preview value object and is shared by any future publication surface.
+_dataset_media_key = dataset_media_key
 
-def _dataset_media_key(
-    source: DatasetPreviewSource,
-    index: int,
-    *,
-    used_keys: set[str] | None = None,
-) -> str:
-    episode = f"episode_{source.episode:06d}" if source.episode is not None else "representative"
-    camera = "".join(character if character.isalnum() else "_" for character in source.video_key).strip("_")
-    key = f"dataset_video/{episode}/{camera or f'camera_{index:03d}'}"
-    if used_keys is None or key not in used_keys:
-        return key
 
-    # Dots and underscores are both normalized above, so retain a reversible encoding of the
-    # original camera key only when that normalization collides with an earlier media key.
-    suffix = source.video_key.encode("utf-8").hex()
-    candidate = f"{key}__camera_{suffix}"
-    duplicate = 1
-    while candidate in used_keys:
-        candidate = f"{key}__camera_{suffix}_{duplicate}"
-        duplicate += 1
-    return candidate
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
 
 
 def cmd_dataset_upload(args: argparse.Namespace) -> None:
@@ -121,11 +110,18 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
     dataset = inspect_transfer_dataset(args.root)
     aliases = args.aliases or ["latest"]
     sources = (
-        [] if args.no_preview else select_dataset_preview_sources(dataset, episodes=args.preview_episodes)
+        []
+        if args.no_preview
+        else select_dataset_preview_sources(
+            dataset,
+            episodes=args.preview_episodes,
+            preview_all=args.preview_all,
+            max_episodes=args.preview_max_episodes,
+        )
     )
 
     with contextlib.ExitStack() as exit_stack:
-        previews: list[tuple[DatasetPreviewSource, Path]] = []
+        preview_batch: PreparedPreviewBatch | None = None
         if sources:
             root = args.root.resolve()
             tmp_dir = Path(
@@ -138,12 +134,7 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
                     f"The dataset preview temp dir {tmp_dir} must be outside the dataset root {root}: "
                     "a preview inside the artifact root would be uploaded with it."
                 )
-            for index, source in enumerate(sources):
-                preview = prepare_dataset_preview(
-                    root / source.relative_path,
-                    tmp_dir / f"preview-{index:03d}.mp4",
-                )
-                previews.append((source, preview))
+            preview_batch = prepare_dataset_previews(root, sources, tmp_dir)
 
         run = wandb.init(entity=args.entity, project=args.project, job_type="dataset_upload", mode="online")
         try:
@@ -155,16 +146,26 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
                 aliases=aliases,
                 metadata=dataset.metadata.to_wandb_metadata(),
             )
-            if previews:
+            if preview_batch is not None and preview_batch.previews:
                 # Artifact files are canonical bytes, not W&B run media. Explicit wandb.Video
                 # values make the selected H.264 previews visible in W&B's Media browser.
                 media = {}
                 used_media_keys: set[str] = set()
-                for index, (source, preview) in enumerate(previews):
+                for index, prepared in enumerate(preview_batch.previews):
+                    source = prepared.source
                     media_key = _dataset_media_key(source, index, used_keys=used_media_keys)
                     used_media_keys.add(media_key)
-                    media[media_key] = wandb.Video(str(preview), format="mp4")
+                    media[media_key] = wandb.Video(str(prepared.path), format="mp4")
                 run.log(media)
+            run.summary.update(
+                _dataset_upload_summary(
+                    args=args,
+                    dataset=dataset,
+                    result=result,
+                    preview_batch=preview_batch,
+                    run=run,
+                )
+            )
         finally:
             # A transcoded preview lives in the sibling temp dir, so it must outlive run.finish().
             run.finish()
@@ -174,15 +175,54 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
         print(f"Dataset schema: {dataset.metadata.schema_version} ({dataset.layout} transfer layout)")
         if args.no_preview:
             print("Run media preview: disabled (--no-preview).")
-        elif not previews:
+        elif preview_batch is None or not preview_batch.previews:
             print("Run media preview: no video exists in this dataset.")
         else:
-            for source, _preview in previews:
-                episode = (
-                    f"episode {source.episode}" if source.episode is not None else "representative v3 chunk"
-                )
+            for prepared in preview_batch.previews:
+                source = prepared.source
+                episode = f"episode {source.episode}" if source.episode is not None else "representative"
                 print(f"Run media preview: {episode}, {source.video_key} <- {source.relative_path}")
-            print("The Artifact keeps the original video bytes; playback is on this upload Run's Media tab.")
+            print(
+                f"Preview bytes: {preview_batch.total_bytes} / {preview_batch.budget_bytes}; "
+                "the Artifact keeps the original video bytes; playback is on this upload Run's Media tab."
+            )
+
+
+def _dataset_upload_summary(
+    *,
+    args: argparse.Namespace,
+    dataset: TransferDataset,
+    result: object,
+    preview_batch: PreparedPreviewBatch | None,
+    run: object | None = None,
+) -> dict[str, object]:
+    """Build run-visible dataset facts after the Artifact has resolved to an immutable ref."""
+
+    requested_ref = getattr(result, "requested_ref", None)
+    if not isinstance(requested_ref, str):
+        entity = args.entity
+        if not isinstance(entity, str) or not entity:
+            run_entity = getattr(run, "entity", None)
+            entity = run_entity if isinstance(run_entity, str) and run_entity else None
+        requested_ref = (
+            f"{entity}/{args.project}/{args.name}" if entity is not None else f"{args.project}/{args.name}"
+        )
+    resolved_ref = getattr(result, "resolved_ref", None)
+    if not isinstance(resolved_ref, str):
+        resolved_ref = ""
+    representative_episode = preview_batch.representative_episode if preview_batch is not None else None
+    episode_indices = list(preview_batch.episode_indices) if preview_batch is not None else []
+    summary: dict[str, object] = {
+        "dataset_schema_version": dataset.metadata.schema_version,
+        "dataset_artifact_requested_ref": requested_ref,
+        "dataset_artifact_resolved_ref": resolved_ref,
+        "dataset_preview_representative_episode_index": representative_episode,
+        "dataset_preview_episode_indices": episode_indices,
+        "dataset_preview_count": len(preview_batch.previews) if preview_batch is not None else 0,
+        "dataset_preview_bytes": preview_batch.total_bytes if preview_batch is not None else 0,
+        "dataset_preview_budget_bytes": preview_batch.budget_bytes if preview_batch is not None else 0,
+    }
+    return summary
 
 
 def cmd_dataset_download(args: argparse.Namespace) -> None:
@@ -431,16 +471,30 @@ def build_parser() -> argparse.ArgumentParser:
         "Artifact, with a browser-playable review preview when video exists.",
     )
     _add_upload_args(dataset_upload_parser)
-    dataset_upload_parser.add_argument(
+    preview_selectors = dataset_upload_parser.add_mutually_exclusive_group()
+    preview_selectors.add_argument(
         "--preview-episode",
         dest="preview_episodes",
         type=int,
         action="append",
         default=[],
-        help="Repeatable v2.1-only exact episode selector for W&B run-media previews. All camera "
+        help="Repeatable exact episode selector for W&B run-media previews. All camera "
         "videos for each requested episode are logged. Without this flag, one deterministic "
-        "representative video is logged. v3 stores multiple episodes per video file, so exact "
-        "episode selection is refused there rather than mislabeled.",
+        "representative video is logged. Shared v3 video chunks are trimmed to the selected "
+        "episode boundaries before publication.",
+    )
+    preview_selectors.add_argument(
+        "--preview-all",
+        action="store_true",
+        help="Publish every episode and camera as separate review media. Refused when the dataset "
+        "exceeds --preview-max-episodes.",
+    )
+    dataset_upload_parser.add_argument(
+        "--preview-max-episodes",
+        type=_positive_int,
+        default=DEFAULT_PREVIEW_MAX_EPISODES,
+        help=f"Maximum episodes allowed by --preview-all (default: {DEFAULT_PREVIEW_MAX_EPISODES}). "
+        "Raise this explicitly to opt into larger review-media uploads.",
     )
     dataset_upload_parser.add_argument(
         "--no-preview",

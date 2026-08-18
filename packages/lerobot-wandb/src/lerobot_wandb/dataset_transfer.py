@@ -31,19 +31,26 @@ through W&B even though the installed current LeRobot reader would not train fro
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from numbers import Integral
 from pathlib import Path
 from typing import Any, Literal
 
-import av
 import pyarrow.parquet as pq
 from packaging.version import InvalidVersion, Version
 
 from . import lerobot_adapter as _lerobot
 from .compatibility import check_lerobot_compatible
+from .dataset_preview import (
+    DEFAULT_PREVIEW_PROFILE,
+    DatasetPreviewSource,
+    PreviewProfile,
+    is_browser_compatible,
+    prepare_dataset_preview as _prepare_dataset_preview,
+)
 from .inspect import DatasetDirectoryError, DatasetDirectoryMetadata, inspect_dataset_directory
-from .rollout import prepare_rollout_preview, select_representative_video
 
 V21_INFO_PATH = Path("meta/info.json")
 V21_EPISODES_PATH = Path("meta/episodes.jsonl")
@@ -51,6 +58,7 @@ V21_EPISODES_STATS_PATH = Path("meta/episodes_stats.jsonl")
 V21_TASKS_PATH = Path("meta/tasks.jsonl")
 
 DatasetLayout = Literal["v2.1", "v3"]
+DEFAULT_PREVIEW_MAX_EPISODES = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,15 +69,6 @@ class TransferDataset:
     layout: DatasetLayout
     metadata: DatasetDirectoryMetadata
     info: dict[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
-class DatasetPreviewSource:
-    """One source video selected for W&B review media."""
-
-    episode: int | None
-    video_key: str
-    relative_path: Path
 
 
 def inspect_transfer_dataset(root: Path | str) -> TransferDataset:
@@ -104,76 +103,170 @@ def select_dataset_preview_sources(
     dataset: TransferDataset,
     *,
     episodes: Sequence[int] = (),
+    preview_all: bool = False,
+    max_episodes: int = DEFAULT_PREVIEW_MAX_EPISODES,
 ) -> list[DatasetPreviewSource]:
     """Select bounded review media without changing the canonical artifact.
 
     With no explicit episode request, exactly one deterministic representative source is selected.
-    For v2.1, ``episodes`` may be repeated and selects every camera video for those exact episodes.
-    v3 stores multiple episodes inside one video file, so an episode number cannot honestly identify
-    a standalone source video; callers must omit ``episodes`` and get one representative chunk.
+    Explicit episodes and ``preview_all`` select every camera for each selected episode. v2.1
+    sources are already episode-per-file; v3 sources carry the exact timestamp range to trim from
+    their shared video file. ``preview_all`` is refused when the dataset exceeds ``max_episodes``.
     """
-    if dataset.layout == "v3" and episodes:
-        requested = ", ".join(str(ep) for ep in episodes)
+    if preview_all and episodes:
         raise DatasetDirectoryError(
-            "--preview-episode is exact only for v2.1 datasets, where each episode has its own "
-            f"video file. This v3 dataset stores multiple episodes per video chunk (requested: {requested}). "
-            "Omit --preview-episode to log one representative chunk, or use the v2.1 GR00T copy "
-            "when episode-level review is required."
+            "--preview-all and --preview-episode are mutually exclusive; choose one review mode."
         )
+    if preview_all and max_episodes <= 0:
+        raise DatasetDirectoryError(f"preview maximum must be greater than zero, got {max_episodes}.")
+    if preview_all and dataset.metadata.total_episodes > max_episodes:
+        raise DatasetDirectoryError(
+            f"--preview-all selected {dataset.metadata.total_episodes} episodes, exceeding the configured "
+            f"maximum of {max_episodes}. Raise --preview-max-episodes explicitly to allow this upload."
+        )
+
+    is_representative = not preview_all and not episodes
+    selected = list(range(dataset.metadata.total_episodes)) if preview_all else list(dict.fromkeys(episodes))
+    for episode in selected:
+        if isinstance(episode, bool) or not isinstance(episode, Integral):
+            raise DatasetDirectoryError(f"preview episode must be an integer, got {episode!r}.")
+        if episode < 0 or episode >= dataset.metadata.total_episodes:
+            raise DatasetDirectoryError(
+                f"preview episode {episode} is outside the dataset range "
+                f"0..{dataset.metadata.total_episodes - 1}."
+            )
+    selected = [int(episode) for episode in selected]
 
     if dataset.metadata.total_episodes == 0 or not dataset.metadata.video_keys:
         return []
 
+    # The default representative is deliberately one exact episode and *every* camera.  Keeping
+    # this selection schema-neutral is what lets a Workspace key configured for one dataset
+    # schema work for the other. Episode zero is the stable representative index; it is also
+    # surfaced in run summary metadata so users never have to infer it from a key.
+    selected = selected or [0]
+    video_keys = tuple(sorted(dataset.metadata.video_keys))
     if dataset.layout == "v2.1":
-        selected = list(dict.fromkeys(episodes)) if episodes else [0]
-        for episode in selected:
-            if episode < 0 or episode >= dataset.metadata.total_episodes:
-                raise DatasetDirectoryError(
-                    f"preview episode {episode} is outside the dataset range "
-                    f"0..{dataset.metadata.total_episodes - 1}."
-                )
-        video_keys = dataset.metadata.video_keys if episodes else dataset.metadata.video_keys[:1]
         return [
             DatasetPreviewSource(
                 episode=episode,
                 video_key=video_key,
                 relative_path=_v21_video_path(dataset.root, dataset.info, episode, video_key),
+                is_representative=is_representative,
             )
             for episode in selected
             for video_key in video_keys
         ]
 
-    representative = select_representative_video(dataset.root)
-    if representative is None:
-        return []
-    return [
-        DatasetPreviewSource(
-            episode=None,
-            video_key=representative.video_key,
-            relative_path=Path(representative.path),
+    video_path = dataset.info.get("video_path")
+    if not isinstance(video_path, str):
+        raise DatasetDirectoryError(
+            f"{dataset.root}/{V21_INFO_PATH} cannot resolve episode previews: no video_path template."
         )
-    ]
+    rows: dict[int, dict[str, Any]] = {}
+    try:
+        episode_rows = _lerobot.load_episodes(dataset.root)
+        for row_number, row in enumerate(episode_rows):
+            raw_episode = row.get("episode_index")
+            if isinstance(raw_episode, bool) or not isinstance(raw_episode, Integral) or raw_episode < 0:
+                raise ValueError(f"row {row_number} has invalid episode_index={raw_episode!r}")
+            episode_index = int(raw_episode)
+            if episode_index in rows:
+                raise ValueError(f"duplicate episode_index={episode_index}")
+            rows[episode_index] = row
+    except DatasetDirectoryError:
+        raise
+    except Exception as error:
+        raise DatasetDirectoryError(
+            f"{dataset.root} episode metadata could not be read for preview selection: {error}"
+        ) from error
+    resolved: list[DatasetPreviewSource] = []
+    for episode in selected:
+        row = rows.get(episode)
+        if row is None:
+            raise DatasetDirectoryError(
+                f"{dataset.root} episode metadata has no row for requested preview episode {episode}."
+            )
+        for video_key in video_keys:
+            try:
+                raw_chunk_index = row[f"videos/{video_key}/chunk_index"]
+                raw_file_index = row[f"videos/{video_key}/file_index"]
+                if (
+                    isinstance(raw_chunk_index, bool)
+                    or not isinstance(raw_chunk_index, Integral)
+                    or raw_chunk_index < 0
+                ):
+                    raise ValueError(f"invalid chunk_index={raw_chunk_index!r}")
+                if (
+                    isinstance(raw_file_index, bool)
+                    or not isinstance(raw_file_index, Integral)
+                    or raw_file_index < 0
+                ):
+                    raise ValueError(f"invalid file_index={raw_file_index!r}")
+                chunk_index = int(raw_chunk_index)
+                file_index = int(raw_file_index)
+                raw_start_timestamp = row[f"videos/{video_key}/from_timestamp"]
+                raw_end_timestamp = row[f"videos/{video_key}/to_timestamp"]
+                if isinstance(raw_start_timestamp, bool) or isinstance(raw_end_timestamp, bool):
+                    raise ValueError("timestamps must be numeric, not boolean")
+                start_timestamp_s = float(raw_start_timestamp)
+                end_timestamp_s = float(raw_end_timestamp)
+                if not (
+                    math.isfinite(start_timestamp_s)
+                    and math.isfinite(end_timestamp_s)
+                    and start_timestamp_s >= 0
+                    and end_timestamp_s > start_timestamp_s
+                ):
+                    raise ValueError(f"invalid timestamp range {start_timestamp_s}..{end_timestamp_s}")
+                relative_path = _safe_template_path(
+                    dataset.root,
+                    video_path,
+                    f"video {video_key!r}",
+                    video_key=video_key,
+                    chunk_index=chunk_index,
+                    file_index=file_index,
+                    episode_index=episode,
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise DatasetDirectoryError(
+                    f"{dataset.root} cannot resolve v3 preview episode {episode}, camera {video_key!r}: "
+                    f"{error}"
+                ) from error
+            resolved.append(
+                DatasetPreviewSource(
+                    episode=episode,
+                    video_key=video_key,
+                    relative_path=relative_path,
+                    start_timestamp_s=start_timestamp_s,
+                    end_timestamp_s=end_timestamp_s,
+                    is_representative=is_representative,
+                )
+            )
+    return resolved
 
 
-def prepare_dataset_preview(source: Path, destination: Path) -> Path:
-    """Return a browser-playable preview, avoiding a transcode when the source already qualifies."""
-    if _is_browser_h264(source):
-        return source
-    return prepare_rollout_preview(source, destination)
+def prepare_dataset_preview(
+    source: Path,
+    destination: Path,
+    *,
+    start_timestamp_s: float | None = None,
+    end_timestamp_s: float | None = None,
+    exact_source: bool | None = None,
+    profile: PreviewProfile = DEFAULT_PREVIEW_PROFILE,
+) -> Path:
+    """Create browser-playable review media through the companion-local preview boundary."""
+    return _prepare_dataset_preview(
+        source,
+        destination,
+        start_timestamp_s=start_timestamp_s,
+        end_timestamp_s=end_timestamp_s,
+        exact_source=exact_source,
+        profile=profile,
+    )
 
 
 def _is_browser_h264(path: Path) -> bool:
-    try:
-        with av.open(str(path)) as container:
-            if not container.streams.video:
-                return False
-            stream = container.streams.video[0]
-            codec = (stream.codec_context.name or "").lower()
-            pix_fmt = (stream.codec_context.pix_fmt or "").lower()
-            return codec in {"h264", "avc1"} and pix_fmt == "yuv420p"
-    except Exception:
-        # Codec probing is best-effort. A failed probe simply takes the safe transcode path.
-        return False
+    return is_browser_compatible(path, profile=DEFAULT_PREVIEW_PROFILE)
 
 
 def _load_info_json(root: Path) -> dict[str, Any]:

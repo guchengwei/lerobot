@@ -13,11 +13,15 @@
 # limitations under the License.
 
 import json
-from pathlib import Path, PurePosixPath
+from fractions import Fraction
+from pathlib import Path
 
+import av
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from lerobot.datasets.pyav_utils import get_codec
 
 from lerobot_wandb import dataset_transfer
 from lerobot_wandb.compatibility import LeRobotCompatibilityError
@@ -25,10 +29,14 @@ from lerobot_wandb.dataset_transfer import (
     DatasetPreviewSource,
     TransferDataset,
     inspect_transfer_dataset,
+    prepare_dataset_preview,
     select_dataset_preview_sources,
 )
 from lerobot_wandb.inspect import DatasetDirectoryError, DatasetDirectoryMetadata
-from lerobot_wandb.rollout import RepresentativeVideo
+
+require_h264 = pytest.mark.skipif(
+    get_codec("h264") is None, reason="'h264' encoder not in local FFmpeg build"
+)
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -150,9 +158,10 @@ def test_v21_default_preview_is_one_deterministic_video(tmp_path):
 
     previews = select_dataset_preview_sources(dataset)
 
-    assert len(previews) == 1
-    assert previews[0].episode == 0
-    assert previews[0].video_key == "observation.images.front"
+    assert [(preview.episode, preview.video_key, preview.is_representative) for preview in previews] == [
+        (0, "observation.images.front", True),
+        (0, "observation.images.wrist", True),
+    ]
     assert previews[0].relative_path == Path("videos/chunk-000/observation.images.front/episode_000000.mp4")
 
 
@@ -169,6 +178,54 @@ def test_v21_preview_episode_selects_every_camera(tmp_path):
         "observation.images.wrist",
     ]
     assert all("episode_000001.mp4" in str(preview.relative_path) for preview in previews)
+
+
+def test_v21_repeatable_preview_episode_selects_multiple_episodes(tmp_path):
+    root = tmp_path / "v21"
+    _write_v21_dataset(root, cameras=("observation.images.front", "observation.images.wrist"))
+    dataset = inspect_transfer_dataset(root)
+
+    previews = select_dataset_preview_sources(dataset, episodes=[0, 1])
+
+    assert [(preview.episode, preview.video_key) for preview in previews] == [
+        (0, "observation.images.front"),
+        (0, "observation.images.wrist"),
+        (1, "observation.images.front"),
+        (1, "observation.images.wrist"),
+    ]
+
+
+def test_v21_preview_all_selects_every_episode_and_camera(tmp_path):
+    root = tmp_path / "v21"
+    _write_v21_dataset(root, cameras=("observation.images.front", "observation.images.wrist"))
+    dataset = inspect_transfer_dataset(root)
+
+    previews = select_dataset_preview_sources(dataset, preview_all=True, max_episodes=2)
+
+    assert [(preview.episode, preview.video_key) for preview in previews] == [
+        (0, "observation.images.front"),
+        (0, "observation.images.wrist"),
+        (1, "observation.images.front"),
+        (1, "observation.images.wrist"),
+    ]
+
+
+def test_preview_all_rejects_explicit_episode_selectors(tmp_path):
+    root = tmp_path / "v21"
+    _write_v21_dataset(root)
+    dataset = inspect_transfer_dataset(root)
+
+    with pytest.raises(DatasetDirectoryError, match="mutually exclusive"):
+        select_dataset_preview_sources(dataset, episodes=[0], preview_all=True, max_episodes=2)
+
+
+def test_preview_all_refuses_dataset_larger_than_configured_maximum(tmp_path):
+    root = tmp_path / "v21"
+    _write_v21_dataset(root)
+    dataset = inspect_transfer_dataset(root)
+
+    with pytest.raises(DatasetDirectoryError, match="2 episodes.*maximum of 1"):
+        select_dataset_preview_sources(dataset, preview_all=True, max_episodes=1)
 
 
 def test_v21_missing_video_is_rejected(tmp_path):
@@ -188,29 +245,39 @@ def test_v21_preview_rejects_video_template_without_episode_per_file_proof(tmp_p
         inspect_transfer_dataset(root)
 
 
-@pytest.mark.parametrize(
-    ("total_episodes", "video_keys"),
-    [(0, ("observation.images.wrist",)), (1, ())],
-    ids=["empty-episodes", "empty-video-keys"],
-)
-def test_v3_exact_episode_is_rejected_before_empty_preview_short_circuit(
-    tmp_path, total_episodes, video_keys
-):
+def test_exact_episode_validates_range_before_empty_preview_short_circuit(tmp_path):
     metadata = DatasetDirectoryMetadata(
         schema_version="v3.0",
         robot_type="so101",
         fps=30,
-        total_episodes=total_episodes,
+        total_episodes=0,
         total_frames=0,
         total_tasks=0,
-        camera_keys=video_keys,
-        video_keys=video_keys,
+        camera_keys=("observation.images.wrist",),
+        video_keys=("observation.images.wrist",),
         git_commit=None,
     )
     dataset = TransferDataset(root=tmp_path, layout="v3", metadata=metadata, info={})
 
-    with pytest.raises(DatasetDirectoryError, match="exact only for v2.1"):
+    with pytest.raises(DatasetDirectoryError, match="outside the dataset range"):
         select_dataset_preview_sources(dataset, episodes=[0])
+
+
+def test_exact_episode_without_video_returns_no_preview(tmp_path):
+    metadata = DatasetDirectoryMetadata(
+        schema_version="v3.0",
+        robot_type="so101",
+        fps=30,
+        total_episodes=1,
+        total_frames=1,
+        total_tasks=1,
+        camera_keys=(),
+        video_keys=(),
+        git_commit=None,
+    )
+    dataset = TransferDataset(root=tmp_path, layout="v3", metadata=metadata, info={})
+
+    assert select_dataset_preview_sources(dataset, episodes=[0]) == []
 
 
 @pytest.mark.parametrize(
@@ -230,22 +297,188 @@ def test_v21_malformed_video_template_is_wrapped_as_dataset_error(tmp_path, vide
         inspect_transfer_dataset(root)
 
 
-def test_v3_exact_episode_preview_is_refused(tmp_path):
+@pytest.mark.parametrize(
+    ("episode", "expected_path", "expected_start", "expected_end"),
+    [
+        (0, "videos/observation.images.wrist/chunk-000/file-000.mp4", 0.0, 1.0),
+        (1, "videos/observation.images.wrist/chunk-000/file-000.mp4", 1.0, 2.5),
+        (2, "videos/observation.images.wrist/chunk-000/file-000.mp4", 2.5, 4.0),
+    ],
+    ids=["first", "middle", "last"],
+)
+def test_v3_exact_episode_resolves_shared_chunk_boundaries(
+    tmp_path, monkeypatch, episode, expected_path, expected_start, expected_end
+):
     metadata = DatasetDirectoryMetadata(
         schema_version="v3.0",
         robot_type="so101",
         fps=30,
-        total_episodes=20,
-        total_frames=100,
+        total_episodes=3,
+        total_frames=120,
         total_tasks=1,
         camera_keys=("observation.images.wrist",),
         video_keys=("observation.images.wrist",),
         git_commit=None,
     )
-    dataset = TransferDataset(root=tmp_path, layout="v3", metadata=metadata, info={})
+    dataset = TransferDataset(
+        root=tmp_path,
+        layout="v3",
+        metadata=metadata,
+        info={"video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"},
+    )
+    monkeypatch.setattr(
+        dataset_transfer._lerobot,
+        "load_episodes",
+        lambda _root: [
+            {
+                "episode_index": index,
+                "videos/observation.images.wrist/chunk_index": 0,
+                "videos/observation.images.wrist/file_index": 0,
+                "videos/observation.images.wrist/from_timestamp": start,
+                "videos/observation.images.wrist/to_timestamp": end,
+            }
+            for index, (start, end) in enumerate(((0.0, 1.0), (1.0, 2.5), (2.5, 4.0)))
+        ],
+    )
 
-    with pytest.raises(DatasetDirectoryError, match="exact only for v2.1"):
-        select_dataset_preview_sources(dataset, episodes=[10])
+    assert select_dataset_preview_sources(dataset, episodes=[episode]) == [
+        DatasetPreviewSource(
+            episode=episode,
+            video_key="observation.images.wrist",
+            relative_path=Path(expected_path),
+            start_timestamp_s=expected_start,
+            end_timestamp_s=expected_end,
+        )
+    ]
+
+
+def test_v3_preview_all_selects_every_episode_and_camera(tmp_path, monkeypatch):
+    video_keys = ("observation.images.front", "observation.images.wrist")
+    metadata = DatasetDirectoryMetadata(
+        schema_version="v3.0",
+        robot_type="so101",
+        fps=30,
+        total_episodes=2,
+        total_frames=60,
+        total_tasks=1,
+        camera_keys=video_keys,
+        video_keys=video_keys,
+        git_commit=None,
+    )
+    dataset = TransferDataset(
+        root=tmp_path,
+        layout="v3",
+        metadata=metadata,
+        info={"video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"},
+    )
+    monkeypatch.setattr(
+        dataset_transfer._lerobot,
+        "load_episodes",
+        lambda _root: [
+            {
+                "episode_index": episode,
+                **{
+                    field: value
+                    for video_key in video_keys
+                    for field, value in (
+                        (f"videos/{video_key}/chunk_index", 0),
+                        (f"videos/{video_key}/file_index", 0),
+                        (f"videos/{video_key}/from_timestamp", float(episode)),
+                        (f"videos/{video_key}/to_timestamp", float(episode + 1)),
+                    )
+                },
+            }
+            for episode in range(2)
+        ],
+    )
+
+    previews = select_dataset_preview_sources(dataset, preview_all=True, max_episodes=2)
+
+    assert [
+        (preview.episode, preview.video_key, preview.start_timestamp_s, preview.end_timestamp_s)
+        for preview in previews
+    ] == [
+        (0, "observation.images.front", 0.0, 1.0),
+        (0, "observation.images.wrist", 0.0, 1.0),
+        (1, "observation.images.front", 1.0, 2.0),
+        (1, "observation.images.wrist", 1.0, 2.0),
+    ]
+
+
+def test_prepare_dataset_preview_trims_exact_episode_to_h264(tmp_path, monkeypatch):
+    source = tmp_path / "shared-chunk.mp4"
+    source.write_bytes(b"source")
+    destination = tmp_path / "preview.mp4"
+    calls = []
+
+    def _prepare(input_path, output_path, **kwargs):
+        calls.append((input_path, output_path, kwargs))
+        output_path.write_bytes(b"episode-only-h264")
+        return output_path
+
+    monkeypatch.setattr(dataset_transfer, "_prepare_dataset_preview", _prepare)
+
+    result = prepare_dataset_preview(
+        source,
+        destination,
+        start_timestamp_s=1.0,
+        end_timestamp_s=2.5,
+    )
+
+    assert result == destination
+    assert calls == [
+        (
+            source,
+            destination,
+            {
+                "start_timestamp_s": 1.0,
+                "end_timestamp_s": 2.5,
+                "exact_source": None,
+                "profile": dataset_transfer.DEFAULT_PREVIEW_PROFILE,
+            },
+        )
+    ]
+
+
+@require_h264
+@pytest.mark.parametrize(
+    ("start", "end", "expected_channel"),
+    [(0.0, 1.0, 0), (1.0, 2.0, 1), (2.0, 3.0, 2)],
+    ids=["first", "middle", "last"],
+)
+def test_prepare_dataset_preview_contains_only_selected_episode_frames(
+    tmp_path, start, end, expected_channel
+):
+    source = tmp_path / "shared-chunk.mp4"
+    colors = ((255, 0, 0), (0, 255, 0), (0, 0, 255))
+    with av.open(str(source), mode="w") as container:
+        stream = container.add_stream("h264", rate=2)
+        stream.width = 16
+        stream.height = 16
+        stream.pix_fmt = "yuv420p"
+        for frame_index in range(6):
+            episode = frame_index // 2
+            pixels = np.full((16, 16, 3), colors[episode], dtype=np.uint8)
+            frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
+            frame.pts = frame_index
+            frame.time_base = Fraction(1, 2)
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+
+    destination = tmp_path / f"episode-{expected_channel}.mp4"
+    prepare_dataset_preview(
+        source,
+        destination,
+        start_timestamp_s=start,
+        end_timestamp_s=end,
+    )
+
+    with av.open(str(destination)) as container:
+        frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
+    assert len(frames) == 2
+    assert all(frame.mean(axis=(0, 1)).argmax() == expected_channel for frame in frames)
 
 
 def test_v3_default_preview_uses_declared_representative_path(tmp_path, monkeypatch):
@@ -266,18 +499,29 @@ def test_v3_default_preview_uses_declared_representative_path(tmp_path, monkeypa
         metadata=metadata,
         info={"video_path": "recordings/{video_key}/{chunk_index:03d}-{file_index:03d}.mkv"},
     )
-    representative = RepresentativeVideo(
-        path=PurePosixPath("recordings/observation.images.wrist/002-003.mkv"),
-        video_key="observation.images.wrist",
-        episodes=(10, 11),
+    monkeypatch.setattr(
+        dataset_transfer._lerobot,
+        "load_episodes",
+        lambda _root: [
+            {
+                "episode_index": episode,
+                "videos/observation.images.wrist/chunk_index": 2,
+                "videos/observation.images.wrist/file_index": 3,
+                "videos/observation.images.wrist/from_timestamp": float(episode),
+                "videos/observation.images.wrist/to_timestamp": float(episode + 1),
+            }
+            for episode in range(20)
+        ],
     )
-    monkeypatch.setattr(dataset_transfer, "select_representative_video", lambda _root: representative)
 
     assert select_dataset_preview_sources(dataset) == [
         DatasetPreviewSource(
-            episode=None,
+            episode=0,
             video_key="observation.images.wrist",
             relative_path=Path("recordings/observation.images.wrist/002-003.mkv"),
+            start_timestamp_s=0.0,
+            end_timestamp_s=1.0,
+            is_representative=True,
         )
     ]
 

@@ -132,6 +132,14 @@ command は `your-wandb-entity/so101-pick-cube/pick-cube:v0` のような immuta
 表示します。次の training command は mutable な `raw` alias を指定しますが、W&B Run には実際に
 解決された `vN` が記録されます。
 
+Run Media で episode ごとに確認するには `--preview-episode N` を繰り返し指定するか、すべての
+episode と camera を publish する `--preview-all` を使います。v3 dataset では episode metadata の
+timestamp を使い、共有 video chunk から各 episode だけを review media として切り出します。Artifact
+内の元 video byte は変更しません。all-episode mode の上限は既定で 50 episode です。より大きい
+dataset では Run 作成前に失敗するため、追加の upload cost を許容する場合だけ
+`--preview-max-episodes N` で上限を明示的に引き上げてください。review media が不要なら
+`--no-preview` を指定します。
+
 ## 3. Artifact から直接 training する
 
 `dataset.repo_id` と `dataset.artifact_ref` は同時に指定できません。Artifact は dataset object の生成前に
