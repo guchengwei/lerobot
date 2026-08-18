@@ -15,7 +15,7 @@ separately installable **companion distribution** at `packages/lerobot-wandb` (i
   unsupported;
 - imports LeRobot only through the single adapter module `lerobot_wandb/lerobot_adapter.py`
   (dataset metadata/readers, video re-encoding, checkout commit detection);
-- owns the `lerobot-wandb` console script and the `wandb-workspaces` optional dependency.
+- owns the `lerobot-wandb` console script.
 
 `WandBLogger` imports the companion's public API (`download_artifact`, `upload_directory`,
 `validate_dataset_directory`, `inspect_model_directory`, `registry_link_refusal`, sidecar

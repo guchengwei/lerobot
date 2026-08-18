@@ -56,7 +56,6 @@ install the companion into that environment without touching LeRobot:
 
 ```bash
 pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
-# optional: append [wandb-workspace] (e.g. lerobot-wandb[wandb-workspace] @ git+...) for workspace create
 ```
 
 The distribution is not yet published to PyPI; the install command shortens to `pip install
@@ -68,8 +67,8 @@ real-robot rollout, rollout publication with lineage, and promotion of the exact
 version. Its commands assume the source environment above is active.
 
 The manual distinguishes **portable companion features** — dataset/model/rollout Artifact
-transfer, model promotion, H.264 rollout previews, and workspace creation, which work against a
-plain upstream LeRobot install — from **fork-only training hooks** — `lerobot-train
+transfer, model promotion, and H.264 rollout previews, which work against a plain upstream
+LeRobot install — from **fork-only training hooks** — `lerobot-train
 --dataset.artifact_ref` and final-model publication from the training lifecycle, which require
 this fork. The companion never patches upstream `lerobot-train` behavior.
 

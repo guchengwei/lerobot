@@ -43,7 +43,6 @@ companion) and never a second one from the fork's own distribution.
 - dataset/model Artifact upload and download
 - model promotion and Registry links
 - rollout publication and browser-playable previews
-- workspace creation (`lerobot-wandb[wandb-workspace]`)
 
 ## Dataset video review and v2.1 transfer
 
