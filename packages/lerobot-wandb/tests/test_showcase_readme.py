@@ -22,6 +22,7 @@ claim to exercise live W&B or robot hardware.
 
 import re
 import shlex
+from dataclasses import fields, make_dataclass
 from pathlib import Path
 from string import Template
 
@@ -40,6 +41,22 @@ ROOT_README = REPO_ROOT / "README.md"
 # parsed by draccus from a much larger config surface and are deliberately out of scope here.
 _BASH_BLOCK = re.compile(r"```bash\n(.*?)```", re.S)
 _EXPORT = re.compile(r'^export\s+([A-Z_][A-Z0-9_]*)="([^"]*)"\s*$', re.M)
+_FORK_DATASET_FIELDS = frozenset({"artifact_ref"})
+_FORK_WANDB_FIELDS = frozenset({"model_artifact_aliases", "model_artifact_name", "registered_model_name"})
+
+
+def _config_supports_fork_training_hooks(dataset_config: type, wandb_config: type) -> bool:
+    dataset_fields = {field.name for field in fields(dataset_config)}
+    wandb_fields = {field.name for field in fields(wandb_config)}
+    return dataset_fields >= _FORK_DATASET_FIELDS and wandb_fields >= _FORK_WANDB_FIELDS
+
+
+def _fork_training_hooks_available() -> bool:
+    try:
+        from lerobot.configs.default import DatasetConfig, WandBConfig
+    except ImportError:
+        return False
+    return _config_supports_fork_training_hooks(DatasetConfig, WandBConfig)
 
 
 def _readme_text() -> str:
@@ -125,6 +142,16 @@ def test_readme_command_parses_against_the_real_cli(command):
     assert callable(args.func)
 
 
+def test_fork_training_capability_gate_distinguishes_config_surfaces():
+    upstream_dataset = make_dataclass("UpstreamDatasetConfig", [("repo_id", object)])
+    upstream_wandb = make_dataclass("UpstreamWandBConfig", [("project", object)])
+    fork_dataset = make_dataclass("ForkDatasetConfig", [(field, object) for field in _FORK_DATASET_FIELDS])
+    fork_wandb = make_dataclass("ForkWandBConfig", [(field, object) for field in _FORK_WANDB_FIELDS])
+
+    assert not _config_supports_fork_training_hooks(upstream_dataset, upstream_wandb)
+    assert _config_supports_fork_training_hooks(fork_dataset, fork_wandb)
+
+
 def _readme_train_command() -> list[str]:
     for block in _BASH_BLOCK.findall(_readme_text()):
         for command in block.replace("\\\n", " ").splitlines():
@@ -139,6 +166,9 @@ def test_readme_train_command_parses_and_validates(tmp_path):
     (`dataset.artifact_ref`, `wandb.model_artifact_name`, ...) rather than the standalone CLI, so it
     is parsed and validated rather than only eyeballed.
     """
+    if not _fork_training_hooks_available():
+        pytest.skip("fork-only training hooks are unavailable in this LeRobot environment")
+
     pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
     import draccus
     from lerobot.configs.train import TrainPipelineConfig

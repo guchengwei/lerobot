@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -83,7 +84,8 @@ def _write_dataset(root: Path, episode_lengths: tuple[int, ...] = (1,)) -> Path:
         robot_type="so101",
         use_videos=False,
         video_backend="pyav",
-        metadata_buffer_size=1,
+        # Keep all fixture episodes in one metadata batch for compatible LeRobot releases.
+        metadata_buffer_size=max(1, len(episode_lengths)),
     )
     for episode_index, length in enumerate(episode_lengths):
         for frame_index in range(length):
@@ -349,7 +351,17 @@ def test_inspect_git_commit_matches_lerobot_checkout_head(tmp_path):
     metadata = inspect_dataset_directory(root)
     repo_root = Path(__file__).resolve().parents[3]
     expected = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=repo_root)
-    if expected.returncode == 0 and (repo_root / "src" / "lerobot").is_dir():
+    lerobot_spec = find_spec("lerobot")
+    lerobot_package = (
+        Path(lerobot_spec.origin).resolve().parent
+        if lerobot_spec is not None and lerobot_spec.origin is not None
+        else None
+    )
+    if (
+        expected.returncode == 0
+        and lerobot_package is not None
+        and lerobot_package == (repo_root / "src" / "lerobot").resolve()
+    ):
         assert metadata.git_commit == expected.stdout.strip()
     else:
         assert metadata.git_commit is None
