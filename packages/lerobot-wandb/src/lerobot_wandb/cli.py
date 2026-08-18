@@ -26,6 +26,10 @@ Examples:
 lerobot-wandb dataset upload --root ./my-dataset --entity my-team --project my-project \
     --name pick-cube --alias raw
 
+# v2.1/GR00T: log the exact episode as browser-playable run media while preserving the Artifact.
+lerobot-wandb dataset upload --root ./my-v21-dataset --entity my-team --project my-project \
+    --name pick-cube-v21 --preview-episode 10
+
 lerobot-wandb dataset download --ref my-team/my-project/pick-cube:latest --root ./materialized
 
 lerobot-wandb model upload --root ./outputs/train/pretrained_model --entity my-team \
@@ -41,8 +45,8 @@ lerobot-wandb rollout upload --root ./rollout_pick-cube --entity my-team --proje
     --name pick-cube-rollout --model-ref my-team/my-project/pick-cube-policy:v3 \
     --episodes-succeeded 7
 
-The rollout Artifact keeps the original (AV1) videos unchanged; the one representative video is
-additionally transcoded to a browser-compatible H.264/yuv420p preview and logged as run media.
+Dataset and rollout Artifacts keep their original videos unchanged. Browser-compatible H.264/yuv420p
+previews are separate run media; they are review derivatives, never canonical training data.
 ```
 """
 
@@ -55,11 +59,17 @@ from pathlib import Path
 import wandb
 
 from .compatibility import LeRobotCompatibilityError, set_allow_unsupported
+from .dataset_transfer import (
+    DatasetPreviewSource,
+    inspect_transfer_dataset,
+    prepare_dataset_preview,
+    select_dataset_preview_sources,
+    validate_transfer_dataset,
+)
 from .inspect import (
-    inspect_dataset_directory,
+    DatasetDirectoryError,
     inspect_model_directory,
     registry_link_refusal,
-    validate_dataset_directory,
     validate_model_directory,
 )
 from .refs import parse_artifact_ref
@@ -88,26 +98,98 @@ from .workspace import (
 DATASET_ARTIFACT_TYPE = "dataset"
 
 
+def _dataset_media_key(
+    source: DatasetPreviewSource,
+    index: int,
+    *,
+    used_keys: set[str] | None = None,
+) -> str:
+    episode = f"episode_{source.episode:06d}" if source.episode is not None else "representative"
+    camera = "".join(character if character.isalnum() else "_" for character in source.video_key).strip("_")
+    key = f"dataset_video/{episode}/{camera or f'camera_{index:03d}'}"
+    if used_keys is None or key not in used_keys:
+        return key
+
+    # Dots and underscores are both normalized above, so retain a reversible encoding of the
+    # original camera key only when that normalization collides with an earlier media key.
+    suffix = source.video_key.encode("utf-8").hex()
+    candidate = f"{key}__camera_{suffix}"
+    duplicate = 1
+    while candidate in used_keys:
+        candidate = f"{key}__camera_{suffix}_{duplicate}"
+        duplicate += 1
+    return candidate
+
+
 def cmd_dataset_upload(args: argparse.Namespace) -> None:
-    # Validate — and pay any local, no-network cost of a bad directory — before a run ever starts.
-    metadata = inspect_dataset_directory(args.root)
+    # Transfer validation is version-aware: current v3 uses the current reader contract, while a
+    # canonical v2.1 directory is validated locally without pretending the current reader can train
+    # from it. Preview selection/preparation is also local and happens before any W&B run exists.
+    dataset = inspect_transfer_dataset(args.root)
     aliases = args.aliases or ["latest"]
+    sources = (
+        [] if args.no_preview else select_dataset_preview_sources(dataset, episodes=args.preview_episodes)
+    )
 
-    run = wandb.init(entity=args.entity, project=args.project, job_type="dataset_upload", mode="online")
-    try:
-        result = upload_directory(
-            run,
-            args.root,
-            name=args.name,
-            artifact_type=DATASET_ARTIFACT_TYPE,
-            aliases=aliases,
-            metadata=metadata.to_wandb_metadata(),
-        )
-    finally:
-        run.finish()
+    with contextlib.ExitStack() as exit_stack:
+        previews: list[tuple[DatasetPreviewSource, Path]] = []
+        if sources:
+            root = args.root.resolve()
+            tmp_dir = Path(
+                exit_stack.enter_context(
+                    tempfile.TemporaryDirectory(dir=root.parent, prefix=f"{root.name}-dataset-preview-")
+                )
+            ).resolve()
+            if tmp_dir == root or root in tmp_dir.parents:
+                raise ValueError(
+                    f"The dataset preview temp dir {tmp_dir} must be outside the dataset root {root}: "
+                    "a preview inside the artifact root would be uploaded with it."
+                )
+            for index, source in enumerate(sources):
+                preview = prepare_dataset_preview(
+                    root / source.relative_path,
+                    tmp_dir / f"preview-{index:03d}.mp4",
+                )
+                previews.append((source, preview))
 
-    print(f"Uploaded dataset artifact: {result.resolved_ref}")
-    print(f"Aliases applied: {', '.join(aliases)}")
+        run = wandb.init(entity=args.entity, project=args.project, job_type="dataset_upload", mode="online")
+        try:
+            result = upload_directory(
+                run,
+                args.root,
+                name=args.name,
+                artifact_type=DATASET_ARTIFACT_TYPE,
+                aliases=aliases,
+                metadata=dataset.metadata.to_wandb_metadata(),
+            )
+            if previews:
+                # Artifact files are canonical bytes, not W&B run media. Explicit wandb.Video
+                # values make the selected H.264 previews visible in W&B's Media browser.
+                media = {}
+                used_media_keys: set[str] = set()
+                for index, (source, preview) in enumerate(previews):
+                    media_key = _dataset_media_key(source, index, used_keys=used_media_keys)
+                    used_media_keys.add(media_key)
+                    media[media_key] = wandb.Video(str(preview), format="mp4")
+                run.log(media)
+        finally:
+            # A transcoded preview lives in the sibling temp dir, so it must outlive run.finish().
+            run.finish()
+
+        print(f"Uploaded dataset artifact: {result.resolved_ref}")
+        print(f"Aliases applied: {', '.join(aliases)}")
+        print(f"Dataset schema: {dataset.metadata.schema_version} ({dataset.layout} transfer layout)")
+        if args.no_preview:
+            print("Run media preview: disabled (--no-preview).")
+        elif not previews:
+            print("Run media preview: no video exists in this dataset.")
+        else:
+            for source, _preview in previews:
+                episode = (
+                    f"episode {source.episode}" if source.episode is not None else "representative v3 chunk"
+                )
+                print(f"Run media preview: {episode}, {source.video_key} <- {source.relative_path}")
+            print("The Artifact keeps the original video bytes; playback is on this upload Run's Media tab.")
 
 
 def cmd_dataset_download(args: argparse.Namespace) -> None:
@@ -130,7 +212,7 @@ def cmd_dataset_download(args: argparse.Namespace) -> None:
             parsed,
             expected_type=DATASET_ARTIFACT_TYPE,
             download_root=args.root,
-            validator=validate_dataset_directory,
+            validator=validate_transfer_dataset,
         )
     finally:
         run.finish()
@@ -232,7 +314,13 @@ def cmd_rollout_upload(args: argparse.Namespace) -> None:
     # Everything local and fallible happens before `wandb.init` creates a run: a bad directory, an
     # impossible success count, a malformed model ref or an unavailable preview encoder must not
     # leave an empty run behind.
-    metadata = inspect_dataset_directory(args.root)
+    dataset = inspect_transfer_dataset(args.root)
+    if dataset.layout != "v3":
+        raise DatasetDirectoryError(
+            "rollout upload supports only the current v3.0 dataset layout; v2.1 is transfer-only "
+            "and cannot be used for rollout evaluation."
+        )
+    metadata = dataset.metadata
     validate_success_count(args.episodes_succeeded, metadata.total_episodes)
     parsed_model_ref = parse_artifact_ref(args.model_ref)
     video = select_representative_video(args.root)
@@ -280,8 +368,7 @@ def cmd_rollout_upload(args: argparse.Namespace) -> None:
             )
             run.summary.update(summary.to_wandb_metadata())
             if preview_path is not None:
-                # Path only — no fps=/format=: those don't transcode path input and lie about it.
-                run.log({"rollout_video": wandb.Video(str(preview_path))})
+                run.log({"rollout_video": wandb.Video(str(preview_path), format="mp4")})
         finally:
             # Inside the `with`: the preview temp dir must outlive run.finish().
             run.finish()
@@ -369,13 +456,33 @@ def build_parser() -> argparse.ArgumentParser:
     dataset_action_subparsers = dataset_parser.add_subparsers(dest="action", required=True)
 
     dataset_upload_parser = dataset_action_subparsers.add_parser(
-        "upload", help="Validate and upload a local dataset directory as a versioned W&B Artifact."
+        "upload",
+        help="Validate and upload a local v3.0 or canonical v2.1 dataset as a versioned W&B "
+        "Artifact, with a browser-playable review preview when video exists.",
     )
     _add_upload_args(dataset_upload_parser)
+    dataset_upload_parser.add_argument(
+        "--preview-episode",
+        dest="preview_episodes",
+        type=int,
+        action="append",
+        default=[],
+        help="Repeatable v2.1-only exact episode selector for W&B run-media previews. All camera "
+        "videos for each requested episode are logged. Without this flag, one deterministic "
+        "representative video is logged. v3 stores multiple episodes per video file, so exact "
+        "episode selection is refused there rather than mislabeled.",
+    )
+    dataset_upload_parser.add_argument(
+        "--no-preview",
+        action="store_true",
+        help="Upload only the canonical Artifact and skip W&B run media. Useful when no H.264 "
+        "encoder is available or review media is intentionally undesired.",
+    )
     dataset_upload_parser.set_defaults(func=cmd_dataset_upload)
 
     dataset_download_parser = dataset_action_subparsers.add_parser(
-        "download", help="Download a dataset Artifact into a local, LeRobotDataset-ready directory."
+        "download",
+        help="Download and validate a v3.0 or canonical v2.1 dataset Artifact without converting it.",
     )
     _add_download_args(dataset_download_parser)
     dataset_download_parser.set_defaults(func=cmd_dataset_download)
