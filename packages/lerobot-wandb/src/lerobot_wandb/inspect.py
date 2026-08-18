@@ -69,6 +69,7 @@ class DatasetDirectoryMetadata:
         """JSON-safe dict form, suitable for a W&B Artifact's ``metadata`` argument."""
         return {
             "schema_version": self.schema_version,
+            "dataset_schema_version": self.schema_version,
             "robot_type": self.robot_type,
             "fps": self.fps,
             "total_episodes": self.total_episodes,

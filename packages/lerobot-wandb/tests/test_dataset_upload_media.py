@@ -22,6 +22,7 @@ import pytest
 pytest.importorskip("wandb", reason="wandb is required")
 
 from lerobot_wandb import cli
+from lerobot_wandb.dataset_preview import PreparedDatasetPreview, PreparedPreviewBatch
 from lerobot_wandb.dataset_transfer import DatasetPreviewSource, TransferDataset
 from lerobot_wandb.inspect import DatasetDirectoryMetadata
 
@@ -98,6 +99,19 @@ def test_dataset_preview_all_has_a_positive_configurable_default_limit():
         parser.parse_args([*base, "--preview-all", "--preview-max-episodes", "0"])
 
 
+def test_default_representative_media_key_is_schema_neutral():
+    source = DatasetPreviewSource(
+        episode=7,
+        video_key="observation.images.front/left",
+        relative_path=Path("video.mp4"),
+        is_representative=True,
+    )
+
+    assert cli._dataset_media_key(source, 0) == (
+        "dataset_video/representative/observation.images.front%2Fleft"
+    )
+
+
 def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(tmp_path, monkeypatch):
     root = tmp_path / "dataset"
     source = root / "videos/chunk-000/observation.images.wrist/episode_000010.mp4"
@@ -121,15 +135,29 @@ def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(tmp_pa
 
     state: dict[str, object] = {"prepared": False, "preview": None}
 
-    def _prepare(passed_source: Path, destination: Path, **kwargs) -> Path:
-        assert passed_source == source
-        assert kwargs == {"start_timestamp_s": 1.0, "end_timestamp_s": 2.5}
+    def _prepare_batch(passed_root: Path, passed_sources, destination_dir: Path) -> PreparedPreviewBatch:
+        assert passed_root == root.resolve()
+        assert list(passed_sources) == [selected]
+        assert destination_dir.is_dir()
+        destination = destination_dir / "preview-000000.mp4"
         destination.write_bytes(b"h264-preview")
         state["prepared"] = True
         state["preview"] = destination
-        return destination
+        return PreparedPreviewBatch(
+            previews=(
+                PreparedDatasetPreview(
+                    source=selected,
+                    path=destination,
+                    bytes=destination.stat().st_size,
+                    used_source=False,
+                ),
+            ),
+            total_bytes=destination.stat().st_size,
+            canonical_bytes=100,
+            budget_bytes=20,
+        )
 
-    monkeypatch.setattr(cli, "prepare_dataset_preview", _prepare)
+    monkeypatch.setattr(cli, "prepare_dataset_previews", _prepare_batch)
 
     run = MagicMock()
     run.entity = "my-team"
@@ -178,6 +206,11 @@ def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(tmp_pa
     assert list(media) == ["dataset_video/episode_000010/observation.images.wrist"]
     assert str(state["preview"]) in media[next(iter(media))]
     assert video_calls == [(str(state["preview"]), {"format": "mp4"})]
+    summary = run.summary.update.call_args.args[0]
+    assert summary["dataset_schema_version"] == "v2.1"
+    assert summary["dataset_preview_representative_episode_index"] is None
+    assert summary["dataset_preview_episode_indices"] == [10]
+    assert summary["dataset_artifact_resolved_ref"] == "my-team/my-project/pick-cube-v21:v0"
     run.finish.assert_called_once()
     assert not Path(state["preview"]).exists()
 
@@ -206,11 +239,27 @@ def test_dataset_upload_media_keys_preserve_exact_camera_identity(tmp_path, monk
         lambda _dataset, **_kwargs: sources,
     )
 
-    def _prepare(_source: Path, destination: Path, **_kwargs) -> Path:
-        destination.write_bytes(b"h264-preview")
-        return destination
+    def _prepare_batch(_root: Path, passed_sources, destination_dir: Path) -> PreparedPreviewBatch:
+        previews = []
+        for index, source in enumerate(passed_sources):
+            destination = destination_dir / f"preview-{index:06d}.mp4"
+            destination.write_bytes(b"h264-preview")
+            previews.append(
+                PreparedDatasetPreview(
+                    source=source,
+                    path=destination,
+                    bytes=destination.stat().st_size,
+                    used_source=False,
+                )
+            )
+        return PreparedPreviewBatch(
+            previews=tuple(previews),
+            total_bytes=sum(item.bytes for item in previews),
+            canonical_bytes=100,
+            budget_bytes=100,
+        )
 
-    monkeypatch.setattr(cli, "prepare_dataset_preview", _prepare)
+    monkeypatch.setattr(cli, "prepare_dataset_previews", _prepare_batch)
     run = MagicMock()
     monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: run)
     monkeypatch.setattr(cli.wandb, "Video", lambda path, **kwargs: f"video:{path}")
@@ -247,7 +296,7 @@ def test_dataset_preview_failure_happens_before_wandb_init(tmp_path, monkeypatch
     def _fail_preview(*_args, **_kwargs):
         raise RuntimeError("encoder unavailable")
 
-    monkeypatch.setattr(cli, "prepare_dataset_preview", _fail_preview)
+    monkeypatch.setattr(cli, "prepare_dataset_previews", _fail_preview)
     init = MagicMock()
     monkeypatch.setattr(cli.wandb, "init", init)
 
@@ -267,7 +316,6 @@ def test_dataset_no_preview_uploads_canonical_root_without_generating_media(tmp_
     prepare = MagicMock()
     monkeypatch.setattr(cli, "inspect_transfer_dataset", lambda _root: dataset)
     monkeypatch.setattr(cli, "select_dataset_preview_sources", select)
-    monkeypatch.setattr(cli, "prepare_dataset_preview", prepare)
     run = MagicMock()
     monkeypatch.setattr(cli.wandb, "init", lambda **_kwargs: run)
     uploaded_roots = []

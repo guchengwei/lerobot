@@ -14,7 +14,7 @@
 
 import json
 from fractions import Fraction
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import av
 import numpy as np
@@ -33,7 +33,6 @@ from lerobot_wandb.dataset_transfer import (
     select_dataset_preview_sources,
 )
 from lerobot_wandb.inspect import DatasetDirectoryError, DatasetDirectoryMetadata
-from lerobot_wandb.rollout import RepresentativeVideo
 
 require_h264 = pytest.mark.skipif(
     get_codec("h264") is None, reason="'h264' encoder not in local FFmpeg build"
@@ -159,9 +158,10 @@ def test_v21_default_preview_is_one_deterministic_video(tmp_path):
 
     previews = select_dataset_preview_sources(dataset)
 
-    assert len(previews) == 1
-    assert previews[0].episode == 0
-    assert previews[0].video_key == "observation.images.front"
+    assert [(preview.episode, preview.video_key, preview.is_representative) for preview in previews] == [
+        (0, "observation.images.front", True),
+        (0, "observation.images.wrist", True),
+    ]
     assert previews[0].relative_path == Path("videos/chunk-000/observation.images.front/episode_000000.mp4")
 
 
@@ -409,15 +409,14 @@ def test_prepare_dataset_preview_trims_exact_episode_to_h264(tmp_path, monkeypat
     source = tmp_path / "shared-chunk.mp4"
     source.write_bytes(b"source")
     destination = tmp_path / "preview.mp4"
-    encoder = object()
-    monkeypatch.setattr(dataset_transfer._lerobot, "RGBEncoderConfig", lambda **_kwargs: encoder)
     calls = []
 
-    def _reencode(input_path, output_path, **kwargs):
+    def _prepare(input_path, output_path, **kwargs):
         calls.append((input_path, output_path, kwargs))
         output_path.write_bytes(b"episode-only-h264")
+        return output_path
 
-    monkeypatch.setattr(dataset_transfer._lerobot, "reencode_video", _reencode)
+    monkeypatch.setattr(dataset_transfer, "_prepare_dataset_preview", _prepare)
 
     result = prepare_dataset_preview(
         source,
@@ -432,10 +431,10 @@ def test_prepare_dataset_preview_trims_exact_episode_to_h264(tmp_path, monkeypat
             source,
             destination,
             {
-                "video_encoder": encoder,
-                "overwrite": True,
-                "start_time_s": 1.0,
-                "end_time_s": 2.5,
+                "start_timestamp_s": 1.0,
+                "end_timestamp_s": 2.5,
+                "exact_source": None,
+                "profile": dataset_transfer.DEFAULT_PREVIEW_PROFILE,
             },
         )
     ]
@@ -500,18 +499,29 @@ def test_v3_default_preview_uses_declared_representative_path(tmp_path, monkeypa
         metadata=metadata,
         info={"video_path": "recordings/{video_key}/{chunk_index:03d}-{file_index:03d}.mkv"},
     )
-    representative = RepresentativeVideo(
-        path=PurePosixPath("recordings/observation.images.wrist/002-003.mkv"),
-        video_key="observation.images.wrist",
-        episodes=(10, 11),
+    monkeypatch.setattr(
+        dataset_transfer._lerobot,
+        "load_episodes",
+        lambda _root: [
+            {
+                "episode_index": episode,
+                "videos/observation.images.wrist/chunk_index": 2,
+                "videos/observation.images.wrist/file_index": 3,
+                "videos/observation.images.wrist/from_timestamp": float(episode),
+                "videos/observation.images.wrist/to_timestamp": float(episode + 1),
+            }
+            for episode in range(20)
+        ],
     )
-    monkeypatch.setattr(dataset_transfer, "select_representative_video", lambda _root: representative)
 
     assert select_dataset_preview_sources(dataset) == [
         DatasetPreviewSource(
-            episode=None,
+            episode=0,
             video_key="observation.images.wrist",
             relative_path=Path("recordings/observation.images.wrist/002-003.mkv"),
+            start_timestamp_s=0.0,
+            end_timestamp_s=1.0,
+            is_representative=True,
         )
     ]
 

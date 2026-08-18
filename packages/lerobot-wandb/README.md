@@ -47,10 +47,9 @@ companion) and never a second one from the fork's own distribution.
 ## Dataset video review and v2.1 transfer
 
 `dataset upload` keeps the source directory byte-for-byte as the canonical Artifact and separately
-logs one browser-playable H.264/yuv420p video to the upload Run when video exists. A raw `.mp4`
-visible under the Artifact **Files** tab is only an Artifact file; W&B media playback comes from the
-explicit `wandb.Video` logged on the Run. Use `--no-preview` to keep the previous Artifact-only
-behavior.
+logs browser-playable H.264/yuv420p MP4 Run Media. A raw `.mp4` visible under the Artifact **Files**
+tab is only an Artifact file; W&B media playback comes from the explicit `wandb.Video` logged on the
+Run. Use `--no-preview` to keep the previous Artifact-only behavior.
 
 The transfer path accepts both current LeRobot v3 datasets and canonical v2.1 datasets. v2.1 is
 validated against its episode-per-file layout without asking the current v3 reader to load it, so a
@@ -67,10 +66,11 @@ lerobot-wandb dataset upload \
 ```
 
 Repeat `--preview-episode` to publish more review episodes. Every camera video for each requested
-episode is logged as Run media under a deterministic episode-and-camera key. v2.1 already stores
-one file per episode and camera. For v3, where one video file can span several episodes, the command
-uses the dataset metadata timestamps to create an H.264/yuv420p derivative containing only the
-selected episode. The canonical source file in the Artifact is never re-encoded or replaced.
+episode is logged as Run media under `dataset_video/episode_<six-digit-index>/<camera>`, with camera
+names reversibly escaped. v2.1 already stores one file per episode and camera. For v3, where one video
+file can span several episodes, the command uses the dataset metadata timestamps to create an
+H.264/yuv420p derivative containing only the selected episode. The canonical source file in the
+Artifact is never re-encoded or replaced.
 
 To review every episode explicitly, use the bounded all-episode mode:
 
@@ -84,8 +84,14 @@ lerobot-wandb dataset upload \
 `--preview-all` and `--preview-episode` are mutually exclusive. All-episode publication defaults to
 a maximum of 50 episodes; a larger dataset is refused before a W&B Run is created. Raising
 `--preview-max-episodes N` is an explicit opt-in to the additional encoding, storage, and upload
-cost. Without either selector, only one deterministic representative video is logged. Use
-`--no-preview` to generate and publish no review derivatives.
+cost. Without either selector, episode 0 is selected deterministically for every camera and logged
+under `dataset_video/representative/<camera>` for both v2.1 and v3. The selected episode indices,
+dataset schema version, and requested/resolved Artifact references are written to the upload Run
+summary. Every prepared batch is also bounded by the smaller of 250 MiB and 20% of the canonical
+dataset directory; exceeding that hard budget fails before `wandb.init` with suggestions to select
+fewer episodes or use `--no-preview`. The fixed profile is at most 640 pixels wide, 15 fps, CRF 32,
+and a two-second GOP; quality is never silently lowered. Use `--no-preview` to generate and publish
+no review derivatives.
 
 ## Fork-only features
 
