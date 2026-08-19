@@ -39,6 +39,9 @@ PACKAGE_README = REPO_ROOT / "packages" / "lerobot-wandb" / "README.md"
 JAPANESE_README = REPO_ROOT / "examples" / "wandb_showcase" / "README.ja.md"
 
 CANONICAL_COMPANION_URL = "https://github.com/guchengwei/lerobot-wandb"
+CANONICAL_EN_MANUAL_URL = "https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.md"
+CANONICAL_JA_MANUAL_URL = "https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.ja.md"
+SUPPORTED_COMPANION_RANGE = ">=0.6.1,<0.6.2"
 SOURCE_INSTALL = 'pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"'
 SOURCE_INSTALL_WITH_LEROBOT = (
     'pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git@main"'
@@ -111,6 +114,10 @@ def test_public_docs_point_to_the_canonical_companion_source():
     for path in (ROOT_README, README, JAPANESE_README, PACKAGE_README):
         text = path.read_text()
         assert CANONICAL_COMPANION_URL in text, path
+        assert CANONICAL_EN_MANUAL_URL in text, path
+        assert CANONICAL_JA_MANUAL_URL in text, path
+        assert SUPPORTED_COMPANION_RANGE in text, path
+        assert ">=0.6.1,<0.7.0" not in text, path
         assert SOURCE_INSTALL in text, path
         assert OLD_SUBDIRECTORY_MARKER not in text, path
 
@@ -138,6 +145,13 @@ def test_root_readme_describes_the_companion_boundary_and_fork_hooks():
     assert "uv sync --locked --extra core_scripts --extra feetech --extra training" in fork_section
     assert "source .venv/bin/activate" in fork_section
     assert "lerobot-wandb --help" in fork_section
+
+
+def test_fork_manual_keeps_same_run_publication_in_the_training_step():
+    text = README.read_text()
+
+    assert "training step (§3), including same-run final-model publication" in text
+    assert "same-run final-model publication (§7)" not in text
 
 
 def test_showcase_declares_and_reuses_operator_values():

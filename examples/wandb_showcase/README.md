@@ -1,6 +1,15 @@
 # W&B companion with LeRobot (SO-101) — legacy fork walkthrough
 
-![W&B companion SO-101 workflow](./assets/wandb-workflow-overview-en.jpg)
+![Broader LeRobot × W&B ecosystem overview (not the companion contract)](./assets/wandb-workflow-overview-en.jpg)
+
+This image is a broader LeRobot × W&B ecosystem overview, not the companion capability contract.
+Labels such as **Auto-Upload**, **W&B SDK (Streaming)**, **Deploy / Inference**,
+**Closed-Loop Control**, and “all data, models, and results are stored in your private W&B
+workspace” describe upstream optional settings, historical fork hooks, or external deployment
+context. The companion contract covers explicit Artifact transfer and promotion around ordinary
+LeRobot commands. `lerobot-record`, `lerobot-train`, and `lerobot-rollout` remain LeRobot commands.
+The companion does not automatically record data, stream every run, deploy a model, or save
+everything to W&B. It does not take over the robot control loop.
 
 [English] · [日本語マニュアル](./README.ja.md)
 
@@ -9,8 +18,9 @@ trained policy, roll it out on the robot, and publish the rollout with a lineage
 model that produced it, with W&B as the only remote store.
 
 > [!NOTE]
-> **Legacy fork walkthrough.** This file stays in the LeRobot fork while the companion documentation
-> moves to the [canonical `lerobot-wandb` repository](https://github.com/guchengwei/lerobot-wandb).
+> **Legacy fork walkthrough.** The current companion manuals are the [English manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.md)
+> and [Japanese manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.ja.md). This
+> file remains for the fork-only training path and its surrounding LeRobot commands.
 > `lerobot-wandb` is a W&B companion/integration that runs with ordinary upstream LeRobot. It is
 > an independent package and release source, not a native LeRobot plugin contract or a
 > self-contained product.
@@ -18,8 +28,8 @@ model that produced it, with W&B as the only remote store.
 > `pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"`.
 > The `--dataset.artifact_ref` training path, training-time Artifact materialization, W&B model
 > publication fields, and same-run final-model publication shown below are fork-only hooks. The
-> `lerobot-record` and `lerobot-rollout` commands remain ordinary LeRobot commands. Keep using this
-> manual as a legacy reference until the canonical manual lands.
+> `lerobot-record` and `lerobot-rollout` commands remain ordinary LeRobot commands. Use the linked
+> canonical manuals for the companion workflow; keep this file for the fork-only path.
 
 The diagram is a conceptual overview. The commands and runtime boundaries below describe this
 fork's current end-to-end composition. In particular, W&B is never called from the robot control
@@ -115,10 +125,10 @@ pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-
 
 The install command will change to a PyPI release command after publication.
 
-This manual's training step (§3) and same-run final-model publication (§7) are fork-only hooks and
-need the fork's `training` extra. Dataset/model/rollout Artifact transfer and promotion work with
-ordinary upstream LeRobot. Commands that need LeRobot
-validate the installed version at startup (supported range: `>=0.6.1,<0.7.0`) and fail with an
+This manual's fork-only hook is the training step (§3), including same-run final-model publication.
+It needs the fork's `training` extra. Dataset/model/rollout Artifact transfer and promotion work with
+ordinary upstream LeRobot. Canonical companion commands validate the installed version at startup
+(supported range: `>=0.6.1,<0.6.2`) and fail with an
 actionable message when it is absent or unsupported (`--allow-unsupported-lerobot` is the
 documented experimental override).
 
@@ -213,8 +223,9 @@ is checked against the sidecar written by the first download before training res
 
 ## 4. Fetch the trained policy on the robot machine
 
-The command downloads transactionally into a staging directory, validates that the result is a
-loadable policy checkpoint, and only then moves it to `root`. An interrupted or invalid download
+The command downloads transactionally into a staging directory, checks that the expected policy files
+and configuration are present, and only then moves it to `root`. It does not load or execute model
+weights. An interrupted or invalid download
 does not leave a half-written policy at the destination.
 
 ```bash
@@ -304,8 +315,8 @@ lerobot-wandb model promote \
 Registry link point to the evaluated version, and the printed digest lets you confirm that the bytes
 did not change.
 
-A ref that is not a `model` Artifact is rejected. A version that cannot load as a deployable policy
-is refused a Registry link — for example, a periodic weight-only checkpoint without
+A ref that is not a `model` Artifact is rejected. A version missing the files and configuration
+required for a deployable policy is refused a Registry link — for example, a periodic weight-only checkpoint without
 `config.json`, or an adapter-only checkpoint whose base model is not bundled. The check uses the
 immutable file manifest and requires no download. Omitting `registry-collection` still permits a
 project alias for such a version.

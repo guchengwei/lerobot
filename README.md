@@ -34,7 +34,7 @@ does not replace LeRobot, define a native LeRobot plugin contract, or act as a s
 product.
 
 The companion is installed separately from LeRobot. It never writes into the `lerobot` namespace,
-and commands that need LeRobot validate the installed version at runtime (`>=0.6.1,<0.7.0`).
+and commands that need LeRobot validate the installed version at runtime (`>=0.6.1,<0.6.2`).
 PyPI publication is not available yet, so install the current source revision into an existing
 LeRobot environment:
 
@@ -65,10 +65,10 @@ source .venv/bin/activate
 lerobot-wandb --help
 ```
 
-The **[legacy fork walkthrough](./examples/wandb_showcase/README.md)** keeps the current
-SO-101 end-to-end example while the companion documentation moves to the canonical repository.
-It covers recording, Artifact transfer, fork-only training, model download, real-robot rollout,
-rollout publication with lineage, and promotion of the exact evaluated model version.
+The current companion workflow is documented in the canonical repository's [English manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.md)
+and [Japanese manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.ja.md). The local
+**[legacy fork walkthrough](./examples/wandb_showcase/README.md)** remains as a reference for this
+fork's recording, Artifact transfer, fork-only training, rollout, and model promotion steps.
 
 The integration's terminology and architectural boundaries are documented in
 [`CONTEXT.md`](./CONTEXT.md).

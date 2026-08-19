@@ -2,8 +2,9 @@
 
 > **Canonical source:** the package and its release documentation now live in the
 > [canonical `lerobot-wandb` repository](https://github.com/guchengwei/lerobot-wandb). This
-> README remains with the embedded package during the source cutover; use the canonical repository
-> for current companion documentation.
+> README remains with the embedded package during the source cutover. For the current workflow,
+> use the [English manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.md) or the
+> [Japanese manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.ja.md).
 
 `lerobot-wandb` is a W&B companion/integration that runs with ordinary upstream LeRobot. Its
 package and release source are independent from LeRobot, but the companion is not a replacement
@@ -25,7 +26,10 @@ pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-
 ```
 
 The base distribution does not hard-depend on `lerobot`. Commands that need LeRobot validate the
-installed version at runtime and fail with an actionable message when it is absent or unsupported.
+installed version at runtime against the canonical companion range (`>=0.6.1,<0.6.2`) and fail with
+an actionable message when it is absent or unsupported.
+The embedded copy used by this fork's training glue is fork-only; do not treat its compatibility
+behavior as a broader canonical companion support promise.
 
 ## Development installation
 
