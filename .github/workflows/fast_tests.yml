@@ -83,10 +83,18 @@ jobs:
 
       # TODO(Steven): Evaluate the need of these dependencies
       - name: Install apt dependencies
+        timeout-minutes: 10
         run: |
-          sudo apt-get update && sudo apt-get install -y build-essential git \
-          curl libglib2.0-0 libegl1-mesa-dev ffmpeg \
-          libusb-1.0-0-dev speech-dispatcher libgeos-dev portaudio19-dev
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 install -y build-essential git \
+            curl libglib2.0-0 libegl1-mesa-dev ffmpeg \
+            libusb-1.0-0-dev speech-dispatcher libgeos-dev portaudio19-dev
 
       - name: Setup uv and Python
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6
