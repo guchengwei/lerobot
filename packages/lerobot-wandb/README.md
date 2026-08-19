@@ -1,30 +1,36 @@
 # lerobot-wandb
 
-Companion distribution for moving LeRobot datasets, models, and rollouts to/from
-W&B Artifacts. Installs side-by-side with an existing `lerobot` environment without
-replacing or shadowing it.
+> **Canonical source:** the package and its release documentation now live in the
+> [canonical `lerobot-wandb` repository](https://github.com/guchengwei/lerobot-wandb). This
+> README remains with the embedded package during the source cutover; use the canonical repository
+> for current companion documentation.
+
+`lerobot-wandb` is a W&B companion/integration that runs with ordinary upstream LeRobot. Its
+package and release source are independent from LeRobot, but the companion is not a replacement
+for LeRobot, a native LeRobot plugin contract, or a self-contained product. It moves LeRobot
+datasets, model checkpoints, and rollouts through W&B Artifacts while leaving the `lerobot`
+namespace untouched.
+
+PyPI publication is not available yet. Install the source package into an environment that already
+contains LeRobot:
 
 ```bash
-# Install from this repository (the distribution is not yet published to PyPI):
-pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
-
-# Fresh environment: also installs a compatible LeRobot:
-pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
+pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
 ```
 
-Once the distribution is published to PyPI (see the pending publishing tickets), the
-install command shortens to `pip install lerobot-wandb` (or `pip install 'lerobot-wandb[lerobot]'`
-for a fresh environment).
+For a fresh environment, request the optional `lerobot` extra:
 
-`lerobot-wandb` never installs files into the `lerobot` package namespace, and the
-base distribution does not hard-depend on `lerobot`: commands that need LeRobot
-validate the installed version at runtime and fail with an actionable message when
-it is absent or unsupported.
+```bash
+pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
+```
+
+The base distribution does not hard-depend on `lerobot`. Commands that need LeRobot validate the
+installed version at runtime and fail with an actionable message when it is absent or unsupported.
 
 ## Development installation
 
-The companion is built and installed from this repository. Supported editable
-commands:
+For fork development, the embedded companion package is built and installed from this repository.
+Supported editable commands are:
 
 ```bash
 # Whole fork (root project + companion), from the repository root:
@@ -38,7 +44,7 @@ The fork's `training` extra depends on the companion via a uv path source, so th
 whole-fork command installs exactly one `lerobot-wandb` executable (from the
 companion) and never a second one from the fork's own distribution.
 
-## Portable companion features
+## Companion features with ordinary upstream LeRobot
 
 - dataset/model Artifact upload and download
 - model promotion and Registry links
@@ -95,6 +101,8 @@ no review derivatives.
 
 ## Fork-only features
 
-Training directly from `dataset.artifact_ref` inside `lerobot-train` and final model
-publication from the training lifecycle are fork-specific integrations, not portable
-companion behavior.
+This fork's training glue composes with the companion, but it is not an upstream companion
+contract. The fork-only surface includes `lerobot-train --dataset.artifact_ref`, training-time
+Artifact materialization, the W&B config fields for model publication, and same-run final-model
+publication. `lerobot-record` and `lerobot-rollout` remain ordinary LeRobot commands; the
+companion provides the Artifact transfer around them.

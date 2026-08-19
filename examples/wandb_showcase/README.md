@@ -1,15 +1,28 @@
-# W&B-native LeRobot pipeline (SO-101)
+# W&B companion with LeRobot (SO-101) — legacy fork walkthrough
 
-![W&B-native SO-101 workflow](./assets/wandb-workflow-overview-en.jpg)
+![W&B companion SO-101 workflow](./assets/wandb-workflow-overview-en.jpg)
 
 [English] · [日本語マニュアル](./README.ja.md)
 
 Record on a real robot, publish the dataset, train from that exact dataset version, publish the
 trained policy, roll it out on the robot, and publish the rollout with a lineage edge back to the
-model that produced it — with W&B as the only remote store.
+model that produced it, with W&B as the only remote store.
 
-The diagram is a conceptual overview. The commands and runtime boundaries below are the
-authoritative interface for this fork. In particular, W&B is never called from the robot control
+> [!NOTE]
+> **Legacy fork walkthrough.** This file stays in the LeRobot fork while the companion documentation
+> moves to the [canonical `lerobot-wandb` repository](https://github.com/guchengwei/lerobot-wandb).
+> `lerobot-wandb` is a W&B companion/integration that runs with ordinary upstream LeRobot. It is
+> an independent package and release source, not a native LeRobot plugin contract or a
+> self-contained product.
+> PyPI publication is not available yet; install the companion from the canonical source with
+> `pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"`.
+> The `--dataset.artifact_ref` training path, training-time Artifact materialization, W&B model
+> publication fields, and same-run final-model publication shown below are fork-only hooks. The
+> `lerobot-record` and `lerobot-rollout` commands remain ordinary LeRobot commands. Keep using this
+> manual as a legacy reference until the canonical manual lands.
+
+The diagram is a conceptual overview. The commands and runtime boundaries below describe this
+fork's current end-to-end composition. In particular, W&B is never called from the robot control
 loop.
 
 The commands form a tested template. Supply the setup and runtime values explicitly marked in steps
@@ -34,15 +47,20 @@ flowchart LR
 
 Solid arrows move bytes. The Registry link and the policy-to-rollout lineage edge do not.
 
+The `--dataset.artifact_ref` edge and final-model publication are fork-only training hooks.
+`lerobot-record` and `lerobot-rollout` are ordinary upstream LeRobot commands; the companion adds
+Artifact transfer around them.
+
 ## What this example is and is not
 
 Read this before the commands; it is the part that keeps you from being misled.
 
 - **W&B is the only remote store here.** Nothing in this example pushes to the Hugging Face Hub.
   `lerobot-wandb` never touches the Hub.
-- **Local disk stays the runtime cache and recording buffer.** Artifacts are materialized to disk
-  before anything reads them. W&B is a durable store for finished artifacts, not a filesystem the
-  robot reaches through.
+- **Local disk stays the runtime cache and recording buffer.** Artifact downloads are materialized
+  to disk before anything reads them. In this fork, the `--dataset.artifact_ref` training hook also
+  materializes the dataset under `output_dir`. W&B is a durable store for finished artifacts, not a
+  filesystem the robot reaches through.
 - **No W&B call happens inside the robot control loop.** Publishing is a separate step you run after
   recording or rollout, with the robot disconnected.
 - **Aliases are mutable; versions are immutable.** `latest` and `candidate` can move; `v3` cannot.
@@ -62,7 +80,7 @@ The worked commands target Linux with a Bash-compatible shell. On Windows PowerS
 environment with `.venv\Scripts\Activate.ps1` and replace `/dev/ttyACM*` device paths with the
 corresponding `COM` ports. The remaining CLI arguments are the same.
 
-### 0.1 Fork development environment (this manual's primary path)
+### 0.1 Fork development environment (legacy manual path)
 
 The fork's training integration (`lerobot-train --dataset.artifact_ref`, final-model
 publication) requires the fork itself. Its `training` extra installs the companion
@@ -81,29 +99,28 @@ export WANDB_PROJECT="so101-pick-cube"
 assume an SO-101 follower on `/dev/ttyACM0`, a leader on `/dev/ttyACM1`, and an OpenCV camera at
 index `0`; adjust them to your hardware.
 
-### 0.2 Existing LeRobot environment (companion only)
+### 0.2 Existing LeRobot environment (companion install)
 
-`lerobot-wandb` is an independently installable companion distribution: it coexists with an
-already-installed LeRobot (upstream or compatible fork) without replacing or shadowing it, and
-never installs files into the `lerobot` namespace. Install it into the environment that already
-has LeRobot:
+`lerobot-wandb` runs alongside an already-installed ordinary upstream LeRobot (or a compatible
+fork). It does not replace or shadow LeRobot and never installs files into the `lerobot` namespace.
+PyPI publication is not available yet, so install the companion from its canonical source:
 
 ```bash
-pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
+# Existing LeRobot environment:
+pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
+
+# Fresh environment with a compatible LeRobot:
+pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
 ```
 
-The distribution is not yet published to PyPI; the install command shortens to `pip install
-lerobot-wandb` once it is.
+The install command will change to a PyPI release command after publication.
 
-This manual's training step (§3) and final-model publication (§7) are fork-specific features and
-need the fork's `training` extra. Dataset/model/rollout Artifact transfer and promotion work
-against a plain upstream LeRobot install. Commands that need LeRobot
+This manual's training step (§3) and same-run final-model publication (§7) are fork-only hooks and
+need the fork's `training` extra. Dataset/model/rollout Artifact transfer and promotion work with
+ordinary upstream LeRobot. Commands that need LeRobot
 validate the installed version at startup (supported range: `>=0.6.1,<0.7.0`) and fail with an
 actionable message when it is absent or unsupported (`--allow-unsupported-lerobot` is the
 documented experimental override).
-
-For a fresh environment with no LeRobot yet: `pip install 'lerobot-wandb[lerobot]'` installs a
-compatible LeRobot and the companion in one command.
 
 ## 1. Record a teaching dataset
 
@@ -147,11 +164,14 @@ All-episode mode is capped at 50 episodes by default and fails before creating a
 dataset is larger. Raise `--preview-max-episodes N` explicitly to accept the extra upload cost, or
 use `--no-preview` to publish no review media.
 
-## 3. Train directly from the Artifact
+## 3. Train directly from the Artifact (fork-only hook)
 
-Exactly one of `dataset.repo_id` and `dataset.artifact_ref` may be set. The Artifact is materialized
-under `output_dir` before any dataset object is built, and the Run records both the requested ref and
-the resolved `vN`.
+This is the fork's training composition, not an upstream companion contract. Exactly one of
+`dataset.repo_id` and `dataset.artifact_ref` may be set. The fork materializes the Artifact under
+`output_dir` before it builds a dataset object, and the Run records both the requested ref and the
+resolved `vN`. The `--wandb.model_artifact_name`, `--wandb.model_artifact_aliases`, and
+`--wandb.registered_model_name` fields publish the final model in the same training Run; these W&B
+config fields and that final-model publication are also fork-only.
 
 ```bash
 lerobot-train \
@@ -284,8 +304,8 @@ lerobot-wandb model promote \
 Registry link point to the evaluated version, and the printed digest lets you confirm that the bytes
 did not change.
 
-A ref that is not a `model` Artifact is rejected. A version that cannot load as a standalone policy
-is refused a deployable Registry link — for example, a periodic weight-only checkpoint without
+A ref that is not a `model` Artifact is rejected. A version that cannot load as a deployable policy
+is refused a Registry link — for example, a periodic weight-only checkpoint without
 `config.json`, or an adapter-only checkpoint whose base model is not bundled. The check uses the
 immutable file manifest and requires no download. Omitting `registry-collection` still permits a
 project alias for such a version.

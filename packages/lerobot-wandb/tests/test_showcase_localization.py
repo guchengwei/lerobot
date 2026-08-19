@@ -22,6 +22,9 @@ ENGLISH = SHOWCASE / "README.md"
 JAPANESE = SHOWCASE / "README.ja.md"
 ENGLISH_DIAGRAM = SHOWCASE / "assets" / "wandb-workflow-overview-en.jpg"
 JAPANESE_DIAGRAM = SHOWCASE / "assets" / "wandb-workflow-overview-ja.jpg"
+CANONICAL_COMPANION_URL = "https://github.com/guchengwei/lerobot-wandb"
+SOURCE_INSTALL = 'pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"'
+OLD_SUBDIRECTORY_MARKER = "subdirectory=" + "packages/lerobot-wandb"
 _BASH_BLOCK = re.compile(r"```bash\n(.*?)```", re.S)
 
 
@@ -47,6 +50,28 @@ def test_manuals_link_to_each_other_and_render_local_diagrams() -> None:
 
 def test_localized_manual_uses_the_same_commands_as_english() -> None:
     assert _bash_blocks(JAPANESE) == _bash_blocks(ENGLISH)
+
+
+def test_legacy_manuals_point_to_the_canonical_companion_and_mark_fork_hooks() -> None:
+    english = ENGLISH.read_text()
+    japanese = JAPANESE.read_text()
+
+    assert CANONICAL_COMPANION_URL in english
+    assert CANONICAL_COMPANION_URL in japanese
+    assert SOURCE_INSTALL in english
+    assert SOURCE_INSTALL in japanese
+    assert OLD_SUBDIRECTORY_MARKER not in english
+    assert OLD_SUBDIRECTORY_MARKER not in japanese
+
+    assert "legacy" in english.lower()
+    assert "レガシー" in japanese
+    for text, fork_marker in ((english, "fork-only"), (japanese, "fork 専用")):
+        assert fork_marker in text
+        assert "--dataset.artifact_ref" in text
+        assert "lerobot-record" in text
+        assert "lerobot-rollout" in text
+        assert "wandb.model_artifact_name" in text
+        assert "wandb.registered_model_name" in text
 
 
 def test_japanese_manual_keeps_product_and_runtime_terms_in_english() -> None:

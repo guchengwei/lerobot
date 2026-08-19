@@ -35,6 +35,15 @@ from lerobot_wandb import cli
 REPO_ROOT = Path(__file__).parents[3]
 README = REPO_ROOT / "examples" / "wandb_showcase" / "README.md"
 ROOT_README = REPO_ROOT / "README.md"
+PACKAGE_README = REPO_ROOT / "packages" / "lerobot-wandb" / "README.md"
+JAPANESE_README = REPO_ROOT / "examples" / "wandb_showcase" / "README.ja.md"
+
+CANONICAL_COMPANION_URL = "https://github.com/guchengwei/lerobot-wandb"
+SOURCE_INSTALL = 'pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"'
+SOURCE_INSTALL_WITH_LEROBOT = (
+    'pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git@main"'
+)
+OLD_SUBDIRECTORY_MARKER = "subdirectory=" + "packages/lerobot-wandb"
 
 # A fenced bash block, then every backslash-continued command inside it that starts with the CLI
 # under test. Other tools shown in the README (lerobot-record, lerobot-train, lerobot-rollout) are
@@ -98,14 +107,34 @@ def test_the_readme_actually_contains_commands():
         assert expected in joined
 
 
-def test_root_readme_onboards_the_fork_before_the_upstream_package():
+def test_public_docs_point_to_the_canonical_companion_source():
+    for path in (ROOT_README, README, JAPANESE_README, PACKAGE_README):
+        text = path.read_text()
+        assert CANONICAL_COMPANION_URL in text, path
+        assert SOURCE_INSTALL in text, path
+        assert OLD_SUBDIRECTORY_MARKER not in text, path
+
+    assert SOURCE_INSTALL_WITH_LEROBOT in PACKAGE_README.read_text()
+    assert SOURCE_INSTALL_WITH_LEROBOT in README.read_text()
+
+
+def test_root_readme_describes_the_companion_boundary_and_fork_hooks():
     text = ROOT_README.read_text()
-    fork_start = text.index("## This fork: W&B-native SO-101 workflow")
+    fork_start = text.index("## W&B companion for upstream LeRobot")
     quick_start = text.index("## Quick Start")
     pypi_install = text.index("pip install lerobot", quick_start)
 
     assert fork_start < quick_start < pypi_install
     fork_section = text[fork_start:quick_start]
+    assert "ordinary upstream LeRobot" in fork_section
+    assert "native LeRobot plugin contract" in fork_section
+    assert "package and release source" in fork_section
+    assert "fork-only" in fork_section
+    assert "--dataset.artifact_ref" in fork_section
+    assert "training-time Artifact materialization" in fork_section
+    assert "same-run final-model publication" in fork_section
+    assert "lerobot-record" in fork_section
+    assert "lerobot-rollout" in fork_section
     assert "uv sync --locked --extra core_scripts --extra feetech --extra training" in fork_section
     assert "source .venv/bin/activate" in fork_section
     assert "lerobot-wandb --help" in fork_section

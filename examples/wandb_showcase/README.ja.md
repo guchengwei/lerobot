@@ -1,6 +1,6 @@
-# W&B-native LeRobot pipeline (SO-101) — 日本語マニュアル
+# W&B companion with LeRobot (SO-101) — legacy fork walkthrough 日本語マニュアル
 
-![W&B-native SO-101 workflow 日本語版](./assets/wandb-workflow-overview-ja.jpg)
+![W&B companion SO-101 workflow 日本語版](./assets/wandb-workflow-overview-ja.jpg)
 
 [English manual](./README.md) · 日本語
 
@@ -9,8 +9,20 @@ publish し、同じ Artifact version から training を行い、学習済み p
 「どの policy がその rollout を生成したか」という lineage とともに結果を W&B に記録するまでの
 流れを説明します。
 
-上の図は概念図です。この fork で実装されている正確な interface は、以下の CLI command と
-runtime boundary を参照してください。特に、robot の control loop 内では W&B 通信を行いません。
+> [!NOTE]
+> **レガシー版 fork manual です。** companion の最新ドキュメントは [canonical な
+> `lerobot-wandb` repository](https://github.com/guchengwei/lerobot-wandb) に移行中です。
+> `lerobot-wandb` は ordinary upstream LeRobot と一緒に動く W&B companion/integration です。
+> package と release source は独立していますが、LeRobot の replacement、native plugin contract、
+> 単独で完結する product ではありません。PyPI にはまだ公開されていないため、canonical source から
+> `pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"` で導入します。
+> 以下に示す `--dataset.artifact_ref` training path、training-time Artifact materialization、W&B
+> model publication fields、same-run final-model publication は fork 専用 hook です。
+> `lerobot-record` と `lerobot-rollout` は通常の LeRobot command のままです。canonical manual が
+> 整うまでは、このファイルを legacy reference として利用してください。
+
+上の図は概念図です。以下の command と runtime boundary は、この fork の現在の end-to-end
+composition を説明するものです。特に、robot の control loop 内では W&B 通信を行いません。
 
 専門用語は CLI や W&B UI と対応しやすいように English のまま記載し、操作の意味と注意点を日本語で
 説明します。この manual の command は English manual と同一です。
@@ -32,11 +44,16 @@ flowchart LR
 実線は data byte の移動を表します。Registry link と policy から rollout への lineage edge は、
 model byte を移動しません。
 
+`--dataset.artifact_ref` の edge と final-model publication は fork 専用の training hook です。
+`lerobot-record` と `lerobot-rollout` は通常の upstream LeRobot command であり、companion はその
+前後で Artifact transfer を行います。
+
 ## この example の前提
 
 - **remote store は W&B のみです。** この example から Hugging Face Hub へ push しません。
-- **local disk は runtime cache と recording buffer として残ります。** Artifact は LeRobot が読む前に
-  local disk へ materialize されます。
+- **local disk は runtime cache と recording buffer として残ります。** Artifact download は LeRobot が
+  読む前に local disk へ materialize されます。この fork の `--dataset.artifact_ref` training hook
+  でも `output_dir` 配下に dataset を materialize します。
 - **control loop 内では W&B を呼びません。** upload は recording や rollout の後に別 step として実行します。
 - **alias は mutable、version は immutable です。** `latest` や `candidate` は移動しますが、`v3` は固定です。
 - **training では実際に使用した immutable dataset version を記録します。** input に alias を使っても、
@@ -54,7 +71,7 @@ entity に置き換えます。
 `.venv\Scripts\Activate.ps1` で environment を有効化し、`/dev/ttyACM*` を実機に対応する `COM` port に
 置き換えてください。それ以外の CLI argument は同じです。
 
-### 0.1 Fork development environment（この manual の標準 path）
+### 0.1 Fork development environment（legacy manual の path）
 
 fork の training integration（`lerobot-train --dataset.artifact_ref`、final model publication）
 には fork 本体が必要です。`training` extra は companion distribution `lerobot-wandb` を自動で
@@ -73,27 +90,27 @@ export WANDB_PROJECT="so101-pick-cube"
 `/dev/ttyACM0`、leader が `/dev/ttyACM1`、OpenCV camera が index `0` にある例です。自分の
 hardware に合わせて変更してください。
 
-### 0.2 Existing LeRobot environment（companion のみ）
+### 0.2 Existing LeRobot environment（companion の導入）
 
-`lerobot-wandb` は独立して導入できる companion distribution です。すでに LeRobot（upstream または
-互換 fork）が導入されている environment を置き換えず、`lerobot` namespace には一切 file を配置しません。
-LeRobot が導入済みの environment に、そのまま追加で導入します。
+`lerobot-wandb` は ordinary upstream LeRobot（または互換 fork）と一緒に動く companion/integration
+です。既存の LeRobot を置き換えたり shadow したりせず、`lerobot` namespace に file を配置しません。
+PyPI にはまだ公開されていないため、canonical source から導入します。
 
 ```bash
-pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
+# Existing LeRobot environment:
+pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
+
+# Fresh environment with a compatible LeRobot:
+pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
 ```
 
-この distribution はまだ PyPI に公開されていません。公開された後の install は `pip install
-lerobot-wandb` に短縮されます。
+公開後は PyPI の release command に切り替わります。
 
-この manual の training（§3）と final model publication（§7）は fork 専用機能です。dataset/model/
-rollout Artifact の transfer と promotion は plain upstream LeRobot でも動作します。
+この manual の training（§3）と同じ Run での final-model publication（§7）は fork 専用 hook です。
+dataset/model/rollout Artifact の transfer と promotion は ordinary upstream LeRobot と一緒に使えます。
 LeRobot が必要な command は起動時に導入 version を検証し（対応 range は `>=0.6.1,<0.7.0`）、
 LeRobot が無い・非対応の場合は actionable message で失敗します（`--allow-unsupported-lerobot` が
 実験的な override です）。
-
-LeRobot がまだ無い environment の場合は、`pip install 'lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb'` で互換な LeRobot と
-companion をまとめて導入できます。
 
 ## 1. Teaching dataset を記録する
 
@@ -140,10 +157,13 @@ dataset では Run 作成前に失敗するため、追加の upload cost を許
 `--preview-max-episodes N` で上限を明示的に引き上げてください。review media が不要なら
 `--no-preview` を指定します。
 
-## 3. Artifact から直接 training する
+## 3. Artifact から直接 training する（fork 専用 hook）
 
-`dataset.repo_id` と `dataset.artifact_ref` は同時に指定できません。Artifact は dataset object の生成前に
-`output_dir` 配下へ download されます。
+これは upstream companion contract ではなく、この fork の training composition です。
+`dataset.repo_id` と `dataset.artifact_ref` は同時に指定できません。fork は dataset object の生成前に
+Artifact を `output_dir` 配下へ materialize し、requested ref と resolved `vN` の両方を Run に記録します。
+`--wandb.model_artifact_name`、`--wandb.model_artifact_aliases`、`--wandb.registered_model_name` は
+同じ training Run から final model を publish するための W&B config field であり、これらも fork 専用です。
 
 ```bash
 lerobot-train \
@@ -164,7 +184,7 @@ lerobot-train \
 ```
 
 `wandb.model_artifact_name` は final checkpoint を versioned model Artifact として publish します。
-`wandb.registered_model_name` は standalone で load できる final policy を Registry collection
+`wandb.registered_model_name` はそのまま load できる final policy を Registry collection
 `wandb-registry-model/pick-cube-policy` にも link します。
 
 resume では、同じ `output_dir` を指定するだけではなく、保存された config を使用します。
@@ -177,7 +197,7 @@ lerobot-train --resume=true \
 最初に download した dataset は再利用され、sidecar に保存された identity と一致することを確認してから
 training を再開します。
 
-> **PEFT/LoRA:** adapter-only checkpoint は Artifact として upload できますが、単独では policy として
+> **PEFT/LoRA:** adapter-only checkpoint は Artifact として upload できますが、それだけでは policy として
 > load できないため Registry には link しません。deployment 用には merged checkpoint を publish します。
 
 ## 4. Robot machine に policy を download する

@@ -25,23 +25,37 @@
 
 🤗 Comprehensive support for the open-source ecosystem to democratize physical AI.
 
-## This fork: W&B-native SO-101 workflow
+## W&B companion for upstream LeRobot
 
-This fork adds an optional W&B Artifacts and Registry path for moving finalized datasets and
-policies between a recording machine, a training machine, and a robot machine. The worked example
-keeps W&B outside the robot control loop and uses no Hugging Face Hub storage on that path.
+`lerobot-wandb` is a W&B companion/integration that runs with ordinary upstream LeRobot. Its
+package and release source live in the [canonical `lerobot-wandb` repository](https://github.com/guchengwei/lerobot-wandb).
+The companion moves LeRobot datasets, model checkpoints, and rollouts through W&B Artifacts; it
+does not replace LeRobot, define a native LeRobot plugin contract, or act as a self-contained
+product.
 
-`lerobot-wandb` is an independently installable **companion distribution** (import package
-`lerobot_wandb`) that coexists with an already-installed LeRobot: it never installs files into
-the `lerobot` namespace and never replaces or shadows an existing LeRobot. Its commands validate
-the installed LeRobot at runtime (supported range `>=0.6.1,<0.7.0`) and fail with an actionable
-message when it is absent or unsupported.
+The companion is installed separately from LeRobot. It never writes into the `lerobot` namespace,
+and commands that need LeRobot validate the installed version at runtime (`>=0.6.1,<0.7.0`).
+PyPI publication is not available yet, so install the current source revision into an existing
+LeRobot environment:
 
-> [!IMPORTANT]
-> `pip install lerobot` installs the upstream package and does **not** include the `lerobot-wandb`
-> command or this fork's training integration. To use this fork's full workflow — training from an
-> Artifact ref and final-model publication — clone this repository, install its locked environment,
-> and activate it before following the manual:
+```bash
+pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
+```
+
+For a fresh environment, the optional `lerobot` extra installs a compatible LeRobot as well:
+
+```bash
+pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
+```
+
+This fork also contains training glue that composes with the companion. The fork-only hooks are
+`lerobot-train --dataset.artifact_ref`, training-time Artifact materialization, the W&B config
+fields for model publication, and same-run final-model publication. They are not part of the
+upstream companion contract. `lerobot-record` and `lerobot-rollout` remain ordinary LeRobot
+commands; the companion handles Artifact transfer before or after those commands and does not
+patch their control loops.
+
+To run those fork-only hooks, clone this repository and activate its locked environment:
 
 ```bash
 git clone https://github.com/guchengwei/lerobot.git
@@ -51,26 +65,10 @@ source .venv/bin/activate
 lerobot-wandb --help
 ```
 
-To use the sidecar CLI with an **existing** LeRobot environment (upstream or fork) instead,
-install the companion into that environment without touching LeRobot:
-
-```bash
-pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
-```
-
-The distribution is not yet published to PyPI; the install command shortens to `pip install
-lerobot-wandb` once it is.
-
-Then follow the **[worked end-to-end W&B manual](./examples/wandb_showcase/README.md)**. It covers
-recording, dataset publication, training from an immutable Artifact version, model download,
-real-robot rollout, rollout publication with lineage, and promotion of the exact evaluated model
-version. Its commands assume the source environment above is active.
-
-The manual distinguishes **portable companion features** — dataset/model/rollout Artifact
-transfer, model promotion, and H.264 rollout previews, which work against a plain upstream
-LeRobot install — from **fork-only training hooks** — `lerobot-train
---dataset.artifact_ref` and final-model publication from the training lifecycle, which require
-this fork. The companion never patches upstream `lerobot-train` behavior.
+The **[legacy fork walkthrough](./examples/wandb_showcase/README.md)** keeps the current
+SO-101 end-to-end example while the companion documentation moves to the canonical repository.
+It covers recording, Artifact transfer, fork-only training, model download, real-robot rollout,
+rollout publication with lineage, and promotion of the exact evaluated model version.
 
 The integration's terminology and architectural boundaries are documented in
 [`CONTEXT.md`](./CONTEXT.md).
