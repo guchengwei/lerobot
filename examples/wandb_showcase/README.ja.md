@@ -310,3 +310,46 @@ rollout の結果が promotion に十分かどうかは operator が Run を確�
 
 この workflow は単なる file storage ではありません。dataset、training、physical rollout、promotion を
 immutable version と lineage でつなぎ、後から判断の根拠を追えるようにします。
+
+## 8. W&B integration を削除 / uninstall する
+
+companion を直接 install した場合（この fork に埋め込まれていた companion を以前直接 install した場合を
+含む）は、package manager で distribution を削除します。これは package の削除であり、workflow data の
+cleanup ではありません。
+
+```bash
+python -m pip uninstall lerobot-wandb
+```
+
+uv-managed environment では次を使います。
+
+```bash
+uv pip uninstall lerobot-wandb
+```
+
+companion を削除しても、LeRobot、local dataset、download/materialize 済み model、rollout directory、
+training output、`.wandb_artifact.json` などの workflow metadata、W&B credential/configuration、
+remote W&B Artifact/Run/Registry object/alias、共有 Python dependency は削除されません。
+
+この fork workspace を `--extra training` で sync した場合、上の一度だけの uv uninstall を永続的な
+解除方法として扱わないでください。`training` の選択を止め、W&B を含まない training component を
+直接 sync します（必要に応じて `feetech` は利用する hardware extra に置き換えます）。
+
+```bash
+uv sync --locked \
+  --extra core_scripts \
+  --extra feetech \
+  --extra dataset \
+  --extra accelerate-dep
+```
+
+companion が無くなり、通常の LeRobot training が残っていることを確認します。
+
+```bash
+uv pip show lerobot-wandb
+.venv/bin/lerobot-train --help
+```
+
+最初の command は `lerobot-wandb` が未導入であることを示し、2 つ目は引き続き成功するはずです。
+後から `--extra training` を選んで sync すると、integration は設計どおり再導入されます。generic な
+`wandb` library は別の selected dependency が必要とする場合には残ることがあります。
