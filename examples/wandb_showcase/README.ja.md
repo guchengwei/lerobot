@@ -1,21 +1,37 @@
-# W&B-native LeRobot pipeline (SO-101) — 日本語マニュアル
+# LeRobot と W&B companion (SO-101) — fork の旧 manual（日本語）
 
-![W&B-native SO-101 workflow 日本語版](./assets/wandb-workflow-overview-ja.jpg)
+![LeRobot × W&B ecosystem の広い全体像（companion contract ではありません）](./assets/wandb-workflow-overview-ja.jpg)
+
+この画像は LeRobot × W&B ecosystem の広い全体像を示すもので、`lerobot-wandb` の capability
+contract ではありません。**Auto-Upload**、**W&B SDK (Streaming)**、**Deploy / Inference**、
+**Closed-Loop Control**、「すべてのデータ、model、結果を private W&B workspace に保存する」といった
+表示は、upstream の optional 設定、fork の過去の hook、外部 deployment の文脈です。この companion
+contract の範囲は、通常の LeRobot command の前後で明示的に行う Artifact transfer と promotion です。
+`lerobot-record`、`lerobot-train`、`lerobot-rollout` の実行は LeRobot が担当します。data の自動記録、
+全 Run の streaming、model の自動 deploy、すべての data の W&B 保存、robot control loop の引き取りは
+行いません。
 
 [English manual](./README.md) · 日本語
 
-このマニュアルでは、実機で teaching dataset を記録し、その dataset を W&B Artifact として
-publish し、同じ Artifact version から training を行い、学習済み policy を実機で rollout した後、
-「どの policy がその rollout を生成したか」という lineage とともに結果を W&B に記録するまでの
+この manual では、実機で dataset を記録し、W&B Artifact に保存した immutable version から学習します。
+学習した policy を実機で rollout し、その policy と結果を lineage で結び付けて W&B に記録するまでの
 流れを説明します。
 
-上の図は概念図です。この fork で実装されている正確な interface は、以下の CLI command と
-runtime boundary を参照してください。特に、robot の control loop 内では W&B 通信を行いません。
+> [!NOTE]
+> **このファイルは fork 用のレガシー版 manual です。** 現在の companion manual は [English manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.md) と
+> [日本語 manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.ja.md) です。このファイルには fork 専用の training path を残しています。
+> `lerobot-wandb` は、通常の upstream LeRobot と一緒に動く W&B companion/integration です。package の source とリリースは LeRobot とは別に管理されていますが、LeRobot の replacement や native plugin contract ではなく、これだけで完結する product でもありません。
+> PyPI にはまだ公開されていないため、source から `pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"` で導入します。
+> 以下に示す `--dataset.artifact_ref` を使う training、training 中の Artifact materialization、W&B の model publication 用 config field、同じ Run での final-model publication は fork 専用 hook です。
+> `lerobot-record` と `lerobot-rollout` は通常の LeRobot command のままです。companion の現在の使い方は、上の manual を参照してください。
+
+上の図は概念図です。以下の command と runtime boundary は、この fork の現在の構成を説明するものです。
+特に、robot の control loop 内では W&B 通信を行いません。
 
 専門用語は CLI や W&B UI と対応しやすいように English のまま記載し、操作の意味と注意点を日本語で
-説明します。この manual の command は English manual と同一です。
+説明します。ここに示す command は English manual と同一です。
 
-## Pipeline
+## 処理の流れ
 
 ```mermaid
 flowchart LR
@@ -29,15 +45,20 @@ flowchart LR
     MA -->|lineage only| RA
 ```
 
-実線は data byte の移動を表します。Registry link と policy から rollout への lineage edge は、
+実線は data byte の移動を表します。Registry link と policy から rollout への lineage edge は
 model byte を移動しません。
 
-## この example の前提
+`--dataset.artifact_ref` の edge と final-model publication は fork 専用の training hook です。
+`lerobot-record` と `lerobot-rollout` は通常の upstream LeRobot command です。companion はその前後で
+Artifact transfer を明示的に行います。
 
-- **remote store は W&B のみです。** この example から Hugging Face Hub へ push しません。
-- **local disk は runtime cache と recording buffer として残ります。** Artifact は LeRobot が読む前に
-  local disk へ materialize されます。
-- **control loop 内では W&B を呼びません。** upload は recording や rollout の後に別 step として実行します。
+## この例の前提
+
+- **remote store は W&B のみです。** この例から Hugging Face Hub へ push しません。
+- **local disk は recording buffer と runtime cache です。** Artifact download の内容は LeRobot が読む
+  前に local disk へ materialize されます。この fork の `--dataset.artifact_ref` training hook では
+  `output_dir` 配下に dataset を materialize します。
+- **control loop 内では W&B を呼びません。** upload は recording や rollout の後に別 step で行います。
 - **alias は mutable、version は immutable です。** `latest` や `candidate` は移動しますが、`v3` は固定です。
 - **training では実際に使用した immutable dataset version を記録します。** input に alias を使っても、
   Run には resolved version が残ります。
@@ -45,16 +66,16 @@ model byte を移動しません。
   `production` alias を付ける操作が、明示的な promotion です。
 - **rollout の成功数は operator が入力します。** physical task の成功判定は自動化していません。
 
-## 0. Prerequisites
+## 0. 前提条件
 
-この fork を clone した repository root で実行してください。`your-wandb-entity` は、自分の W&B
+この fork を clone した repository の root で実行してください。`your-wandb-entity` は自分の W&B
 entity に置き換えます。
 
 以下の command は Linux の Bash-compatible shell を前提にしています。Windows PowerShell では
 `.venv\Scripts\Activate.ps1` で environment を有効化し、`/dev/ttyACM*` を実機に対応する `COM` port に
 置き換えてください。それ以外の CLI argument は同じです。
 
-### 0.1 Fork development environment（この manual の標準 path）
+### 0.1 fork の開発環境（この旧 manual の実行方法）
 
 fork の training integration（`lerobot-train --dataset.artifact_ref`、final model publication）
 には fork 本体が必要です。`training` extra は companion distribution `lerobot-wandb` を自動で
@@ -73,31 +94,32 @@ export WANDB_PROJECT="so101-pick-cube"
 `/dev/ttyACM0`、leader が `/dev/ttyACM1`、OpenCV camera が index `0` にある例です。自分の
 hardware に合わせて変更してください。
 
-### 0.2 Existing LeRobot environment（companion のみ）
+### 0.2 既存の LeRobot 環境に companion を導入する
 
-`lerobot-wandb` は独立して導入できる companion distribution です。すでに LeRobot（upstream または
-互換 fork）が導入されている environment を置き換えず、`lerobot` namespace には一切 file を配置しません。
-LeRobot が導入済みの environment に、そのまま追加で導入します。
+`lerobot-wandb` は、すでに導入されている通常の upstream LeRobot（または互換 fork）に追加して使う
+companion/integration です。既存の LeRobot を置き換えたり shadow したりせず、`lerobot` namespace に
+file を配置しません。PyPI にはまだ公開されていないため、source から導入します。
 
 ```bash
-pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb"
+# Existing LeRobot environment:
+pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
+
+# Fresh environment with a compatible LeRobot:
+pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git@main"
 ```
 
-この distribution はまだ PyPI に公開されていません。公開された後の install は `pip install
-lerobot-wandb` に短縮されます。
+公開後は PyPI の install command に切り替わります。
 
-この manual の training（§3）と final model publication（§7）は fork 専用機能です。dataset/model/
-rollout Artifact の transfer と promotion は plain upstream LeRobot でも動作します。
-LeRobot が必要な command は起動時に導入 version を検証し（対応 range は `>=0.6.1,<0.7.0`）、
+この manual の fork 専用 hook は training step（§3）で、同じ Run からの final-model publication もここで
+行います。dataset、model、rollout の Artifact transfer と promotion は、通常の upstream LeRobot と
+組み合わせて使えます。companion が必要とする LeRobot の対応 range は `>=0.6.1,<0.6.2` です。
+LeRobot が必要な command は起動時に導入 version を検証し、
 LeRobot が無い・非対応の場合は actionable message で失敗します（`--allow-unsupported-lerobot` が
 実験的な override です）。
 
-LeRobot がまだ無い environment の場合は、`pip install 'lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot.git@main#subdirectory=packages/lerobot-wandb'` で互換な LeRobot と
-companion をまとめて導入できます。
+## 1. データセットを記録する
 
-## 1. Teaching dataset を記録する
-
-通常の LeRobot teleoperation recording です。この時点では W&B は使用しません。
+これは通常の LeRobot による teleoperation recording です。この時点では W&B は関与しません。
 
 ```bash
 lerobot-record \
@@ -111,13 +133,13 @@ lerobot-record \
   --dataset.push_to_hub=false
 ```
 
-recording の途中は local disk に書き込みます。W&B を robot control の storage として直接利用する
-設計ではありません。
+recording 中は local disk に書き込みます。robot control の storage として W&B を直接使う構成では
+ありません。
 
-## 2. Dataset を Artifact として publish する
+## 2. Dataset を Artifact として保存する
 
-W&B Run を作成する前に、local directory を検証します。metadata、Parquet schema、参照 video、index が
-一致しない場合は upload を開始しません。
+W&B Run を作成する前に local directory を検証します。metadata、Parquet schema、参照 video、index が
+一致しない場合は upload を始めません。
 
 ```bash
 lerobot-wandb dataset upload \
@@ -129,21 +151,24 @@ lerobot-wandb dataset upload \
 ```
 
 command は `your-wandb-entity/so101-pick-cube/pick-cube:v0` のような immutable resolved ref を
-表示します。次の training command は mutable な `raw` alias を指定しますが、W&B Run には実際に
+表示します。次の training command では mutable な `raw` alias を指定しますが、W&B Run には実際に
 解決された `vN` が記録されます。
 
-Run Media で episode ごとに確認するには `--preview-episode N` を繰り返し指定するか、すべての
-episode と camera を publish する `--preview-all` を使います。v3 dataset では episode metadata の
+Run Media で episode ごとに確認するには `--preview-episode N` を繰り返し指定するか、`--preview-all` で
+すべての episode と camera の review media を保存します。v3 dataset では episode metadata の
 timestamp を使い、共有 video chunk から各 episode だけを review media として切り出します。Artifact
 内の元 video byte は変更しません。all-episode mode の上限は既定で 50 episode です。より大きい
 dataset では Run 作成前に失敗するため、追加の upload cost を許容する場合だけ
 `--preview-max-episodes N` で上限を明示的に引き上げてください。review media が不要なら
 `--no-preview` を指定します。
 
-## 3. Artifact から直接 training する
+## 3. Artifact から直接学習する（fork 専用 hook）
 
-`dataset.repo_id` と `dataset.artifact_ref` は同時に指定できません。Artifact は dataset object の生成前に
-`output_dir` 配下へ download されます。
+これは upstream companion contract ではなく、この fork が提供する training composition です。
+`dataset.repo_id` と `dataset.artifact_ref` は同時に指定できません。fork は dataset object を作る前に
+Artifact を `output_dir` 配下へ materialize し、requested ref と resolved `vN` の両方を Run に記録します。
+`--wandb.model_artifact_name`、`--wandb.model_artifact_aliases`、`--wandb.registered_model_name` は
+同じ training Run から final model を保存するための W&B config field であり、これらも fork 専用です。
 
 ```bash
 lerobot-train \
@@ -163,8 +188,8 @@ lerobot-train \
   --policy.push_to_hub=false
 ```
 
-`wandb.model_artifact_name` は final checkpoint を versioned model Artifact として publish します。
-`wandb.registered_model_name` は standalone で load できる final policy を Registry collection
+`wandb.model_artifact_name` は final checkpoint を versioned model Artifact として保存します。
+`wandb.registered_model_name` はそのまま load できる final policy を Registry collection
 `wandb-registry-model/pick-cube-policy` にも link します。
 
 resume では、同じ `output_dir` を指定するだけではなく、保存された config を使用します。
@@ -177,13 +202,14 @@ lerobot-train --resume=true \
 最初に download した dataset は再利用され、sidecar に保存された identity と一致することを確認してから
 training を再開します。
 
-> **PEFT/LoRA:** adapter-only checkpoint は Artifact として upload できますが、単独では policy として
-> load できないため Registry には link しません。deployment 用には merged checkpoint を publish します。
+> **PEFT/LoRA:** adapter-only checkpoint は Artifact として upload できますが、それだけでは policy として
+> load できません。そのため Registry には link せず、deployment 用には merged checkpoint を保存します。
 
-## 4. Robot machine に policy を download する
+## 4. robot machine に policy を取得する
 
-download は staging directory で行い、load 可能な policy checkpoint であることを検証した後に
-`root` へ配置します。途中で失敗しても、指定した directory に不完全な policy を残しません。
+download は staging directory で行い、必要な policy file と config が揃っていることを確認した後に
+`root` へ配置します。weight は load も execute もしません。途中で失敗しても、指定した directory に
+不完全な policy を残しません。
 
 ```bash
 lerobot-wandb model download \
@@ -203,7 +229,7 @@ export MODEL_REF="your-wandb-entity/so101-pick-cube/pick-cube-policy:v0"
 
 ## 5. 実機で rollout する
 
-通常の `lerobot-rollout` です。この step は W&B に対して offline で動作します。
+通常の `lerobot-rollout` を実行します。この step は W&B から切り離されています。
 
 ```bash
 lerobot-rollout \
@@ -218,11 +244,11 @@ lerobot-rollout \
   --dataset.push_to_hub=false
 ```
 
-実行中に、task が成功した episode 数を operator が記録します。
+実行中に成功した episode 数を operator が記録します。
 
-## 6. Rollout を policy lineage とともに publish する
+## 6. rollout と policy の lineage を W&B に保存する
 
-先に robot を切り離します。`EPISODES_SUCCEEDED` は観測した成功数へ置き換えてください。`14` は
+先に robot を切り離します。`EPISODES_SUCCEEDED` は実際の成功数に置き換えてください。`14` は
 20 episode 中 14 回成功した場合の例です。
 
 ```bash
@@ -238,12 +264,12 @@ lerobot-wandb rollout upload \
 ```
 
 `candidate` ではなく immutable な `MODEL_REF` を渡します。upload 時に alias を再解決すると、rollout の
-途中で alias が移動した場合、実際に robot が使用していない policy を lineage に記録する危険があります。
+途中で alias が移動した場合、robot が実際に使っていない policy を lineage に記録する危険があります。
 
 upload Run は policy を input lineage edge として参照し、model byte を再 download しません。rollout は
-training dataset と区別された `rollout` Artifact として publish されます。episode 数、成功数、success rate、
+training dataset とは別の `rollout` Artifact として保存されます。episode 数、成功数、success rate、
 frame 数、duration、requested/resolved policy ref が記録されます。完全な rollout data は **元の
-encoding のまま** Artifact に保存されます(LeRobot の既定 video codec は AV1 です)。
+encoding のまま** Artifact に保存されます（LeRobot の既定 video codec は AV1 です）。
 
 > **代表 video について:** 代表 clip は決定的に選択され、追加コマンドなしで browser 互換の
 > H.264/yuv420p preview に transcode され、Run media として自動記録されます。この preview は表示用の
@@ -254,8 +280,8 @@ encoding のまま** Artifact に保存されます(LeRobot の既定 video code
 
 ## 7. 評価済み policy を promote する
 
-rollout で評価した **同じ immutable version** を promote します。download 済み directory を再 upload すると
-新しい version が作られ、評価 Run との lineage が分離するため使用しません。
+rollout で評価した **同じ immutable version** を promote します。download 済み directory を再 upload すると、
+評価 Run と lineage がつながらない新しい version になるため、再 upload は行いません。
 
 ```bash
 lerobot-wandb model promote \
@@ -265,22 +291,22 @@ lerobot-wandb model promote \
 ```
 
 `model promote` は model byte を upload せず、既存 version の alias と Registry link を更新します。
-model Artifact ではない ref、weight のみの periodic checkpoint、adapter-only policy は deployable な Registry
-entry として拒否されます。
+model Artifact ではない ref、weight だけの periodic checkpoint、adapter-only policy は deployable な
+Registry entry として拒否されます。
 
 Registry link は project alias を移動する前に試行されます。2 つの server-side write をまとめる transaction は
-ないため、この順序にすることで Registry link が失敗した場合でも `production` alias は変更されません。
+ないため、Registry link が失敗してもこの順序なら `production` alias は変更されません。
 rollout の結果が promotion に十分かどうかは operator が Run を確認して判断します。
 
 ## 保存先と lineage
 
 | 対象                             | 保存先                                                  |
 | -------------------------------- | ------------------------------------------------------- |
-| Teaching dataset                 | `dataset` Artifact の `pick-cube`                       |
-| Trained policy                   | `model` Artifact の `pick-cube-policy` と Registry link |
-| Rollout episodes                 | `rollout` Artifact の `pick-cube-rollout`               |
-| Dataset から policy への lineage | training Run config と model Artifact metadata          |
-| Policy から rollout への lineage | rollout Run input edge と rollout Artifact metadata     |
+| 記録した dataset                 | `dataset` Artifact の `pick-cube`                       |
+| 学習済み policy                  | `model` Artifact の `pick-cube-policy` と Registry link |
+| rollout の episode               | `rollout` Artifact の `pick-cube-rollout`               |
+| dataset から policy への lineage | training Run config と model Artifact metadata          |
+| policy から rollout への lineage | rollout Run input edge と rollout Artifact metadata     |
 
-この workflow の目的は単なる file storage ではなく、dataset、training、physical rollout、promotion を
-immutable version と lineage で接続し、後から判断根拠を再現できる状態にすることです。
+この workflow は単なる file storage ではありません。dataset、training、physical rollout、promotion を
+immutable version と lineage でつなぎ、後から判断の根拠を追えるようにします。
