@@ -65,6 +65,58 @@ source .venv/bin/activate
 lerobot-wandb --help
 ```
 
+### Remove / uninstall the W&B integration
+
+The removal path depends on how the companion entered the environment.
+
+If `lerobot-wandb` was installed directly — including older direct installs of the embedded
+companion from this fork — uninstall the distribution with the package manager that owns the
+environment:
+
+```bash
+python -m pip uninstall lerobot-wandb
+```
+
+For a uv-managed environment, use:
+
+```bash
+uv pip uninstall lerobot-wandb
+```
+
+Package uninstall removes the `lerobot-wandb` distribution, its `lerobot_wandb` import package,
+and the `lerobot-wandb` executable only. It does **not** remove LeRobot, local datasets,
+downloaded/materialized datasets or models, rollout directories, training outputs, workflow
+sidecars such as `.wandb_artifact.json`, W&B credentials/configuration, remote W&B Artifacts,
+Runs, Registry objects or aliases, or shared/transitive Python dependencies. Installing the
+companion with its optional `lerobot` extra does not change that ownership rule.
+
+If this fork's root environment was created with `--extra training`, a one-off
+`uv pip uninstall lerobot-wandb` is not a durable way to disable the integration. The `training`
+extra declares both W&B support and `lerobot-wandb`, so any later sync that selects
+`--extra training` will reinstall the companion by design. Stop selecting the aggregate extra and
+select the non-W&B training components directly instead:
+
+```bash
+uv sync --locked \
+  --extra core_scripts \
+  --extra feetech \
+  --extra dataset \
+  --extra accelerate-dep
+```
+
+Replace `feetech` with the hardware extra used by your robot. Then verify the companion is gone
+while ordinary LeRobot training remains available:
+
+```bash
+uv pip show lerobot-wandb
+.venv/bin/lerobot-train --help
+```
+
+`uv pip show lerobot-wandb` should report that the package is not installed, while
+`lerobot-train --help` should still succeed. Selecting `--extra training` in a future sync will
+reinstall the integration. The generic `wandb` library is not part of this absence guarantee; it
+may remain if another selected dependency requires it.
+
 The current companion workflow is documented in the canonical repository's [English manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.md)
 and [Japanese manual](https://github.com/guchengwei/lerobot-wandb/blob/main/MANUAL.ja.md). The local
 **[legacy fork walkthrough](./examples/wandb_showcase/README.md)** remains as a reference for this
@@ -155,7 +207,7 @@ lerobot-train \
 | **Reinforcement Learning** | [HIL-SERL](./docs/source/hilserl.mdx), [TDMPC](./docs/source/policy_tdmpc_README.md) & QC-FQL (coming soon)                                                                                                                                                                                                                                                                                |
 | **VLAs Models**            | [Pi0](./docs/source/pi0.mdx), [Pi0Fast](./docs/source/pi0fast.mdx), [Pi0.5](./docs/source/pi05.mdx), [GR00T N1.7](./docs/source/policy_groot_README.md), [SmolVLA](./docs/source/policy_smolvla_README.md), [XVLA](./docs/source/xvla.mdx), [EO-1](./docs/source/eo1.mdx), [MolmoAct2](./docs/source/molmoact2.mdx), [WALL-OSS](./docs/source/walloss.mdx), [EVO1](./docs/source/evo1.mdx) |
 | **World Models**           | [VLA-JEPA](./docs/source/vla_jepa.mdx), [LingBot-VA](./docs/source/lingbot_va.mdx), [FastWAM](./docs/source/fastwam.mdx)                                                                                                                                                                                                                                                                   |
-| **Reward Models**          | [SARM](./docs/source/sarm.mdx), [TOPReward](./docs/source/topreward.mdx), [Robometer](./docs/source/robometer.mdx)                                                                                                                                                                                                                                                                         |
+| **Reward Models**          | [SARM](./docs/source/sarm.mdx), [TOPReward](./docs/source/topreward_README.md), [Robometer](./docs/source/robometer.mdx)                                                                                                                                                                                                                                                                         |
 
 Similarly to the hardware, you can easily implement your own policy & leverage LeRobot's data collection, training, and visualization tools, and share your model to the HF Hub.
 
