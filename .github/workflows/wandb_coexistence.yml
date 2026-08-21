@@ -24,6 +24,9 @@ on:
     branches:
       - main
     paths:
+      - "README.md"
+      - "examples/wandb_showcase/README.md"
+      - "examples/wandb_showcase/README.ja.md"
       - "packages/lerobot-wandb/**"
       - "pyproject.toml"
       - "uv.lock"
@@ -32,6 +35,9 @@ on:
     branches:
       - main
     paths:
+      - "README.md"
+      - "examples/wandb_showcase/README.md"
+      - "examples/wandb_showcase/README.ja.md"
       - "packages/lerobot-wandb/**"
       - "pyproject.toml"
       - "uv.lock"
@@ -67,3 +73,14 @@ jobs:
 
       - name: Run coexistence smoke
         run: bash packages/lerobot-wandb/scripts/coexistence_smoke.sh
+
+      - name: Verify fork workspace can remove companion
+        run: |
+          uv sync --locked --extra dataset --extra accelerate-dep --extra test
+
+          if uv pip show lerobot-wandb >/dev/null 2>&1; then
+            echo "lerobot-wandb remained installed after removing the training extra" >&2
+            exit 1
+          fi
+
+          .venv/bin/lerobot-train --help >/dev/null

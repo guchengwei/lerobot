@@ -46,6 +46,8 @@ SOURCE_INSTALL = 'pip install "lerobot-wandb @ git+https://github.com/guchengwei
 SOURCE_INSTALL_WITH_LEROBOT = (
     'pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git@main"'
 )
+DIRECT_UNINSTALL = "python -m pip uninstall lerobot-wandb"
+UV_UNINSTALL = "uv pip uninstall lerobot-wandb"
 OLD_SUBDIRECTORY_MARKER = "subdirectory=" + "packages/lerobot-wandb"
 
 # A fenced bash block, then every backslash-continued command inside it that starts with the CLI
@@ -123,6 +125,35 @@ def test_public_docs_point_to_the_canonical_companion_source():
 
     assert SOURCE_INSTALL_WITH_LEROBOT in PACKAGE_README.read_text()
     assert SOURCE_INSTALL_WITH_LEROBOT in README.read_text()
+
+
+def test_public_docs_cover_direct_and_fork_workspace_uninstall_paths():
+    for path in (ROOT_README, PACKAGE_README, README, JAPANESE_README):
+        text = path.read_text()
+        assert DIRECT_UNINSTALL in text, path
+        assert UV_UNINSTALL in text, path
+        assert "LeRobot" in text, path
+        assert "dataset" in text.lower(), path
+
+    for path in (ROOT_README, README, JAPANESE_README):
+        text = path.read_text()
+        assert "--extra dataset" in text, path
+        assert "--extra accelerate-dep" in text, path
+        assert "--extra training" in text, path
+        assert "lerobot-train --help" in text, path
+
+    assert "reinstall" in ROOT_README.read_text().lower()
+    assert "reinstall" in README.read_text().lower()
+    assert "再導入" in JAPANESE_README.read_text()
+
+    for path in (ROOT_README, PACKAGE_README, README):
+        text = path.read_text().lower()
+        assert "credentials" in text, path
+        assert "remote w&b" in text, path
+
+    japanese = JAPANESE_README.read_text()
+    assert "credential" in japanese
+    assert "remote W&B" in japanese
 
 
 def test_root_readme_describes_the_companion_boundary_and_fork_hooks():

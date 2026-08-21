@@ -337,3 +337,46 @@ does not compute it.
 | Rollout episodes          | `rollout` Artifact, `pick-cube-rollout`                 |
 | Dataset-to-policy lineage | training Run config and model Artifact metadata         |
 | Policy-to-rollout lineage | rollout Run input edge and rollout Artifact metadata    |
+
+## 8. Remove / uninstall the W&B integration
+
+For a direct companion install — including an older install of the embedded companion from this
+fork — use the package manager. This is package removal, not workflow-data cleanup:
+
+```bash
+python -m pip uninstall lerobot-wandb
+```
+
+For a uv-managed environment, use:
+
+```bash
+uv pip uninstall lerobot-wandb
+```
+
+Removing the companion leaves LeRobot, local datasets, downloaded/materialized models, rollout
+directories, training outputs, `.wandb_artifact.json` and other workflow metadata, W&B
+credentials/configuration, remote W&B Artifacts/Runs/Registry objects/aliases, and shared Python
+dependencies untouched.
+
+If this fork workspace was synced with `--extra training`, do not treat the one-off uv uninstall as
+the persistent solution. Stop selecting `training` and sync the non-W&B training components
+instead (replace `feetech` with your hardware extra when needed):
+
+```bash
+uv sync --locked \
+  --extra core_scripts \
+  --extra feetech \
+  --extra dataset \
+  --extra accelerate-dep
+```
+
+Verify that the companion is absent and ordinary LeRobot training remains available:
+
+```bash
+uv pip show lerobot-wandb
+.venv/bin/lerobot-train --help
+```
+
+The first command should report no installed `lerobot-wandb`; the second should still work. A later
+sync that selects `--extra training` will reinstall the integration by design. The generic `wandb`
+library may remain if another selected dependency requires it.
