@@ -48,6 +48,35 @@ The fork's `training` extra depends on the companion via a uv path source, so th
 whole-fork command installs exactly one `lerobot-wandb` executable (from the
 companion) and never a second one from the fork's own distribution.
 
+## Uninstall
+
+If the companion was installed directly into an environment — including an older direct install of
+the embedded package from this fork — remove the distribution with the environment's package
+manager:
+
+```bash
+python -m pip uninstall lerobot-wandb
+```
+
+For a uv-managed environment, the equivalent command is:
+
+```bash
+uv pip uninstall lerobot-wandb
+```
+
+This removes the `lerobot-wandb` distribution, the `lerobot_wandb` import package, and the
+`lerobot-wandb` executable. It does not remove LeRobot, local datasets, downloaded models, rollouts,
+training outputs or sidecar metadata, W&B credentials/configuration, remote W&B Artifacts/Runs/
+Registry objects, or shared/transitive Python dependencies. Even when the optional `lerobot` extra
+was used in a fresh environment, uninstall follows distribution ownership and does not imply that
+LeRobot should be removed.
+
+Fork developers who created the root environment with `--extra training` must change the selected
+root extras instead of treating `uv pip uninstall lerobot-wandb` as durable. The `training` extra
+declares the companion, so a later sync that selects it will install the companion again. See the
+[root W&B removal section](../../README.md#remove--uninstall-the-wb-integration) for the supported
+`dataset` + `accelerate-dep` transition that keeps ordinary LeRobot training available.
+
 ## Companion features with ordinary upstream LeRobot
 
 - dataset/model Artifact upload and download
